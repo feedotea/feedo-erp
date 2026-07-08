@@ -19,7 +19,7 @@ html,body{height:100%}
 body{
   font-family:"DIN Condensed","Helvetica Neue",Arial,"PingFang TC","Noto Sans TC",sans-serif;
   background:var(--news); color:var(--ink);
-  display:flex; flex-direction:column; height:100vh; overflow:hidden;
+  display:flex; flex-direction:column; min-height:100vh; min-height:100dvh;
 }
 .serif{font-family:"Cormorant Garamond",Georgia,"Songti TC",serif}
 
@@ -33,7 +33,7 @@ body{
 .modebar button{flex:1;background:none;border:1px solid #3a3a3a;color:var(--silver);padding:8px;font-size:13px;letter-spacing:2px;border-radius:2px;cursor:pointer}
 .modebar button.on{background:var(--paper);color:var(--ink);border-color:var(--paper);font-weight:600}
 
-.screen{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:16px 16px 92px}
+.screen{flex:1;padding:16px 16px 150px}
 .screen.hidden{display:none}
 .sec-eyebrow{font-size:10px;letter-spacing:2.5px;color:var(--grey);text-transform:uppercase;margin:4px 0 12px;display:flex;align-items:center;gap:8px}
 .sec-eyebrow::after{content:"";flex:1;height:1px;background:var(--line)}
@@ -65,7 +65,7 @@ body{
 .btn-primary.pending-log{background:var(--gilt);color:var(--ink);animation:pulse 1.5s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.7}}
 
-.submit-bar{position:fixed;left:0;right:0;bottom:62px;padding:10px 16px;background:linear-gradient(transparent,var(--news) 30%);z-index:5}
+.submit-bar{position:fixed;left:0;right:0;bottom:62px;max-width:520px;margin:0 auto;padding:10px 16px;background:linear-gradient(transparent,var(--news) 30%);z-index:45}
 .submit-bar.hidden{display:none}
 .btn-primary{width:100%;background:var(--ink);color:var(--paper);border:none;padding:16px;font-size:15px;letter-spacing:3px;font-weight:600;border-radius:2px;cursor:pointer;text-transform:uppercase}
 .btn-primary:active{background:var(--blue)}
@@ -149,7 +149,7 @@ body{
 .mini-btn{font-size:11px;letter-spacing:1px;border:1px solid var(--gilt);color:var(--gilt);background:none;padding:7px 12px;border-radius:2px;cursor:pointer;text-transform:uppercase}
 select.txt-input{appearance:none;-webkit-appearance:none}
 
-.tabbar{display:flex;background:var(--paper);border-top:1px solid var(--line);flex-shrink:0;height:62px}
+.tabbar{display:flex;background:var(--paper);border-top:1px solid var(--line);position:fixed;left:0;right:0;bottom:0;height:62px;max-width:520px;margin:0 auto;z-index:40;padding-bottom:env(safe-area-inset-bottom)}
 .tab{flex:1;border:none;background:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;color:var(--grey);position:relative}
 .tab.on{color:var(--ink)}
 .tab.on::before{content:"";position:absolute;top:0;left:22%;right:22%;height:2px;background:var(--gilt)}
