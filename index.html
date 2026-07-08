@@ -935,18 +935,28 @@ function nav(scr){
   if(scr==="revenue")renderRevenue();
 }
 
-(async function(){
-  const d=new Date(),wk=["日","一","二","三","四","五","六"][d.getDay()];
-  const base=`${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")} 星期${wk}`;
-  $("#today").textContent=base+" · 連線中…";
-  // 先從雲端載入(有網路就以雲端為準)，載完才畫，避免閃爍/時有時無
-  await cloudLoad();
-  $("#today").textContent=base+(cloudReady?" · ☁ 已連線":" · ⚠ 離線(本機)");
-  monthRevenue=dailyRevenue.filter(r=>r.date.startsWith(curMonth())).reduce((s,r)=>s+r.amt,0);
-  // 一次把所有畫面畫好
+function renderAll(){
   renderSegTabs();renderBrew();renderLog();renderOrder();renderCatTabs();renderInv();refreshSummary();
   renderExpCats();renderReport();renderPay();buildTabs();
   $("#log-submit-btn").textContent="記錄用量";
+}
+(async function(){
+  const d=new Date(),wk=["日","一","二","三","四","五","六"][d.getDay()];
+  const base=`${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")} 星期${wk}`;
+  // 第一階段：立刻用本機資料畫一次(畫面秒出，絕不空白)
+  $("#today").textContent=base+" · 連線中…";
+  renderAll();
+  // 第二階段：雲端載入(加逾時保護，網慢也不會卡死)
+  try{
+    await Promise.race([
+      cloudLoad(),
+      new Promise((_,rej)=>setTimeout(()=>rej("timeout"),8000))
+    ]);
+  }catch(e){ /* 逾時或失敗就維持本機資料 */ }
+  monthRevenue=dailyRevenue.filter(r=>r.date.startsWith(curMonth())).reduce((s,r)=>s+r.amt,0);
+  $("#today").textContent=base+(cloudReady?" · ☁ 已連線":" · ⚠ 離線(本機)");
+  // 雲端回來後再畫一次，覆蓋成最新
+  renderAll();
 })();
 </script>
 </body>
