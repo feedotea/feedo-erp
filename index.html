@@ -665,7 +665,7 @@ function openItemChips(){
 }
 $("#it-tea").addEventListener("click",e=>{if(e.target.dataset.v){itSel.tea=e.target.dataset.v==="yes";
   [...$("#it-tea").children].forEach(b=>b.classList.toggle("on",b.dataset.v===e.target.dataset.v));}});
-function saveItemEdit(){
+async function saveItemEdit(){
   const name=$("#it-name").value.trim();
   if(!name){toast("填品項名稱");return;}
   const bal=parseFloat($("#it-bal").value)||0, safe=parseFloat($("#it-safe").value)||0;
@@ -682,20 +682,23 @@ function saveItemEdit(){
     it={code,name,cat:itSel.cat,unit:itSel.unit,tea:itSel.tea,bal,safe,cost,avgPerDay:avg,supplier,note:""};
     items.push(it);
   }
-  cloudPush({action:"saveItem",item:JSON.stringify(it)});
+  const wasNew=!editingCode;
+  $("#it-save-btn").textContent="儲存中…";
+  await cloudPush({action:"saveItem",item:JSON.stringify(it)});
+  $("#it-save-btn").textContent=wasNew?"新增":"儲存";
   closeModal('item');
   renderInv();renderCatTabs();renderBrew();renderSegTabs();renderLog();renderOrder();refreshSummary();
-  toast(editingCode?`已更新 ${name}`:`已新增 ${name}`);
+  toast(wasNew?`已新增 ${name}（已存雲端）`:`已更新 ${name}（已存雲端）`);
 }
-function deleteItemEdit(){
+async function deleteItemEdit(){
   if(!editingCode)return;
   const it=items.find(i=>i.code===editingCode);
   if(!confirm(`確定刪除「${it.name}」？`))return;
   items=items.filter(i=>i.code!==editingCode);
-  cloudPush({action:"deleteItem",code:editingCode});
+  await cloudPush({action:"deleteItem",code:editingCode});
   closeModal('item');
   renderInv();renderCatTabs();renderBrew();renderSegTabs();renderLog();renderOrder();refreshSummary();
-  toast(`已刪除 ${it.name}`);
+  toast(`已刪除 ${it.name}（已存雲端）`);
 }
 
 /* 開銷 */
@@ -934,19 +937,16 @@ function nav(scr){
 
 (async function(){
   const d=new Date(),wk=["日","一","二","三","四","五","六"][d.getDay()];
-  $("#today").textContent=`${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")} 星期${wk}`;
-  // 先渲染本機資料(秒開)，再從雲端載入覆蓋
+  const base=`${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")} 星期${wk}`;
+  $("#today").textContent=base+" · 連線中…";
+  // 先從雲端載入(有網路就以雲端為準)，載完才畫，避免閃爍/時有時無
+  await cloudLoad();
+  $("#today").textContent=base+(cloudReady?" · ☁ 已連線":" · ⚠ 離線(本機)");
+  monthRevenue=dailyRevenue.filter(r=>r.date.startsWith(curMonth())).reduce((s,r)=>s+r.amt,0);
+  // 一次把所有畫面畫好
   renderSegTabs();renderBrew();renderLog();renderOrder();renderCatTabs();renderInv();refreshSummary();
   renderExpCats();renderReport();renderPay();buildTabs();
   $("#log-submit-btn").textContent="記錄用量";
-  // 雲端載入
-  $("#today").textContent+=" · 連線中…";
-  await cloudLoad();
-  const base=`${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")} 星期${wk}`;
-  $("#today").textContent=base+(cloudReady?" · ☁ 已連線":" · ⚠ 離線(本機)");
-  monthRevenue=dailyRevenue.filter(r=>r.date.startsWith(curMonth())).reduce((s,r)=>s+r.amt,0);
-  renderSegTabs();renderBrew();renderLog();renderOrder();renderCatTabs();renderInv();refreshSummary();
-  renderExpCats();renderReport();renderPay();
 })();
 </script>
 </body>
