@@ -331,6 +331,7 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   </div>
   <div style="display:flex;gap:8px;margin-bottom:8px" id="btn-map-box">
     <button class="mini-btn" style="flex:1" onclick="openPosMap()">🔗 POS 品項對應</button>
+    <button class="mini-btn" style="flex:1" onclick="openRecipes()">🥛 飲料配方</button>
   </div>
   <div style="display:flex;gap:8px;margin-bottom:12px">
     <button class="mini-btn" style="flex:1;border-color:var(--ink);color:var(--ink)" id="btn-new-item" onclick="openItemEdit(null)">＋ 新增品項</button>
@@ -373,6 +374,15 @@ select.txt-input{appearance:none;-webkit-appearance:none}
     <div class="modal-head"><span class="serif">加品項到叫貨單</span><button onclick="closeModal('add')">✕</button></div>
     <div class="modal-note">系統只會提醒快沒的東西。廠商剛好出車、下週有活動要多備，從這裡自己加。</div>
     <div id="add-body"></div>
+  </div>
+</div>
+
+<!-- 飲料配方 -->
+<div class="modal-overlay hidden" id="modal-rec">
+  <div class="modal-sheet">
+    <div class="modal-head"><span class="serif" id="rec-title">飲料配方</span><button onclick="closeRecipes()">✕</button></div>
+    <div class="modal-note" id="rec-note"></div>
+    <div id="rec-body"></div>
   </div>
 </div>
 
@@ -1273,6 +1283,161 @@ async function cancelOrdered(code){
   toast("已取消「等貨中」標記");
 }
 
+/* ---------------------------------------------------------------
+   飲料配方（BOM）
+   在這之前只有周邊算得出毛利，飲料不行 —— 系統不知道一杯用掉
+   多少鮮奶多少糖。結果是開品、定價、砍品全部只能看銷量。
+   賣最好的不一定最賺。
+
+   三條扣料路徑不能互相重疊，這是整頁最容易出錯的地方：
+     茶葉    煮茶頁按桶扣 → 配方裡只算成本，不扣庫存（後端也擋一次）
+     紙杯封膜 POS 匯入自動扣 → 不進配方，成本系統自己加
+     鮮奶糖料 沒人會逐杯登記 → 這才是配方要處理的
+   --------------------------------------------------------------- */
+let recData=null, recOpen=null, recDraft={};
+// 材料成本常常是零點幾塊，四捨五入到整數會讓「包材＋材料」看起來
+// 不等於總額。這裡保留一位小數。
+const m1=n=>"$"+(Math.round(Number(n)*10)/10).toLocaleString();
+
+async function openRecipes(){
+  $("#rec-body").innerHTML=`<div class="empty"><div class="t">讀取中…</div></div>`;
+  $("#modal-rec").classList.remove("hidden");
+  try{
+    recData=await callRpc("erp_recipes_config");
+    recOpen=null; recDraft={};
+    renderRecipes();
+  }catch(e){
+    $("#rec-body").innerHTML=`<div class="empty"><div class="ic">⚠</div><div class="t">${eh(e.message||"讀取失敗")}</div></div>`;
+  }
+}
+function closeRecipes(){ closeModal("rec"); if(analytics) loadAnalytics(true); }
+
+function recRows(name){
+  if(recDraft[name]) return recDraft[name];
+  return ((recData&&recData.recipes)||[]).filter(r=>r.pos_name===name)
+    .map(r=>({item_code:r.item_code, qty:Number(r.qty)||0,
+              scale_by_sweet:!!r.scale_by_sweet, deduct:r.deduct!==false}));
+}
+function recItem(code){ return ((recData&&recData.items)||[]).find(i=>i.code===code); }
+
+/* 一杯的成本：包材（系統自己知道）+ 配方材料。
+   糖用「全糖」估，實際會依每杯甜度打折，所以這裡標成上限。 */
+function recCost(name){
+  const pack=Number(recData&&recData.pack_cost)||0;
+  const ing=recRows(name).reduce((s,r)=>{
+    const it=recItem(r.item_code); return s + (it?Number(it.cost)*r.qty:0);
+  },0);
+  return {pack, ing, total:pack+ing};
+}
+
+function renderRecipes(){
+  const box=$("#rec-body");
+  const drinks=(recData&&recData.drinks)||[];
+  const done=drinks.filter(d=>recRows(d.name).length).length;
+  $("#rec-note").innerHTML=`填一杯用掉多少鮮奶、糖、配料。
+    <b>茶葉只算成本不扣庫存</b>（煮茶頁已經扣過），紙杯封膜系統自己加。
+    <br>已填 <b>${done}</b> / ${drinks.length} 支。`;
+
+  if(!drinks.length){
+    box.innerHTML=`<div class="empty"><div class="t">還沒有飲料資料，先匯入微碧報表</div></div>`;return;
+  }
+  box.innerHTML=drinks.map(d=>{
+    const rows=recRows(d.name), open=recOpen===d.name;
+    const c=recCost(d.name);
+    return `<div class="st-row" style="flex-direction:column;align-items:stretch;gap:0">
+      <div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="recToggle('${esc(d.name)}')">
+        <div style="flex:1;min-width:0">
+          <div class="nm">${eh(d.name)}</div>
+          <div style="font-size:11px;color:var(--grey)">
+            ${eh(d.category||"—")} · 賣出 ${Math.round(Number(d.qty)||0).toLocaleString()} 杯
+            ${rows.length?` · 一杯 ${m1(c.total)}`:` · <span style="color:var(--warn)">還沒填</span>`}</div>
+        </div>
+        <span style="color:var(--grey);font-size:13px">${open?"▾":"▸"}</span>
+      </div>
+      ${open?recEditor(d.name):""}
+    </div>`;
+  }).join("");
+}
+
+function recEditor(name){
+  const rows=recRows(name), items=(recData&&recData.items)||[];
+  const c=recCost(name);
+  const opts=sel=>items.map(i=>`<option value="${i.code}"${i.code===sel?" selected":""}>${eh(i.name)}（${eh(i.unit)}）</option>`).join("");
+  const body=rows.map((r,idx)=>{
+    const it=recItem(r.item_code)||{};
+    const tea=!!it.is_tea;
+    return `<div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap">
+      <select class="txt-input" style="flex:1;min-width:120px;padding:8px;font-size:13px"
+        onchange="recSet('${esc(name)}',${idx},'item_code',this.value)">${opts(r.item_code)}</select>
+      <input class="txt-input" style="width:74px;padding:8px;text-align:center" type="number" step="0.01"
+        inputmode="decimal" value="${r.qty}" onchange="recSet('${esc(name)}',${idx},'qty',this.value)">
+      <span style="font-size:12px;color:var(--grey);width:24px">${eh(it.unit||"")}</span>
+      <button class="brew-undo" style="font-size:14px" onclick="recDel('${esc(name)}',${idx})">✕</button>
+      <div style="flex-basis:100%;font-size:11px;color:var(--grey);display:flex;gap:14px;padding-left:2px">
+        <label style="display:flex;gap:4px;align-items:center">
+          <input type="checkbox" ${r.scale_by_sweet?"checked":""}
+            onchange="recSet('${esc(name)}',${idx},'scale_by_sweet',this.checked)">按甜度縮放</label>
+        ${tea
+          ? `<span style="color:var(--warn)">茶葉：只算成本，不扣庫存</span>`
+          : `<label style="display:flex;gap:4px;align-items:center">
+               <input type="checkbox" ${r.deduct?"checked":""}
+                 onchange="recSet('${esc(name)}',${idx},'deduct',this.checked)">扣庫存</label>`}
+      </div>
+    </div>`;
+  }).join("");
+
+  return `<div style="padding:10px 0 4px;border-top:1px dashed var(--line);margin-top:10px">
+    ${body||`<div style="font-size:12px;color:var(--grey)">還沒有材料</div>`}
+    <div style="display:flex;gap:6px;margin-top:12px">
+      <button class="mini-btn" style="flex:1;padding:9px" onclick="recAdd('${esc(name)}')">＋ 加材料</button>
+      <button class="mini-btn" style="flex:1;padding:9px;border-color:var(--ink)" onclick="recSave('${esc(name)}')">儲存</button>
+    </div>
+    <div style="font-size:11px;color:var(--grey);margin-top:10px;line-height:1.7">
+      一杯成本 <b style="color:var(--ink)">${m1(c.total)}</b>
+      ＝ 包材 ${m1(c.pack)}（紙杯＋封膜，系統自動）＋ 材料 ${m1(c.ing)}
+      <br>「按甜度縮放」打勾的材料，實際扣料會依每一杯的甜度打折（無糖 0、3分甜 0.3）。
+      這裡顯示的是全糖的上限。
+    </div></div>`;
+}
+
+function recToggle(name){ recOpen = recOpen===name ? null : name; renderRecipes(); }
+function recAdd(name){
+  const items=(recData&&recData.items)||[];
+  if(!items.length){toast("沒有可用的材料，先在庫存新增品項");return;}
+  const rows=recRows(name).slice();
+  const used=rows.map(r=>r.item_code);
+  const pick=items.find(i=>!used.includes(i.code))||items[0];
+  rows.push({item_code:pick.code, qty:0, scale_by_sweet:pick.cat==="糖類", deduct:!pick.is_tea});
+  recDraft[name]=rows; renderRecipes();
+}
+function recDel(name,idx){
+  const rows=recRows(name).slice(); rows.splice(idx,1);
+  recDraft[name]=rows; renderRecipes();
+}
+function recSet(name,idx,key,val){
+  const rows=recRows(name).slice();
+  if(!rows[idx])return;
+  if(key==="qty") rows[idx].qty=Number(val)||0;
+  else if(key==="item_code"){
+    rows[idx].item_code=val;
+    const it=recItem(val);
+    if(it&&it.is_tea) rows[idx].deduct=false;      // 茶葉一律只算成本
+  }
+  else rows[idx][key]=!!val;
+  recDraft[name]=rows; renderRecipes();
+}
+async function recSave(name){
+  const rows=recRows(name).filter(r=>r.qty>0);
+  try{
+    await callRpc("erp_save_recipe",{p_pos_name:name, p_rows:rows});
+    // 存完把本地那份丟掉，下次讀就是雲端的真相
+    recData=await callRpc("erp_recipes_config");
+    delete recDraft[name];
+    renderRecipes();
+    toast(`${name} 配方已存（${rows.length} 種材料）`);
+  }catch(e){ toast("存檔失敗："+(e.message||e.code)); }
+}
+
 /* POS 品項對應：微碧品名 → ERP 品項。
    分類已經由營運總表自動帶入，這裡只處理「對到哪個庫存品項」。
    按營收排序，讓店長先處理有份量的。 */
@@ -2015,8 +2180,10 @@ async function submitPosImport(){
           p_cats:null});
         if(r && r.ok!==false){
           done++;
-          // 訂單層獨立存。重匯舊檔就是為了補這個，所以匯過的日子照樣送。
+          // 訂單層和配方扣料都獨立跑。重匯舊檔就是為了補這些，
+          // 所以匯過的日子照樣送 —— 兩支都是整天重算，不會疊加。
           await savePosOrders(day.date);
+          await recipeDeduct([day.date]);
         }
         else fails.push(`${day.date}：${(r&&r.message)||"已匯過"}`);
       }catch(e){ fails.push(`${day.date}：${e.message||e.code||"失敗"}`); }
@@ -2037,6 +2204,7 @@ async function submitPosImport(){
     btn.disabled=false;btn.textContent="確認匯入";
     if(r&&r.ok===false){posShowError(r.message||"匯入失敗", r);return;}
     await savePosOrders(null);
+    await recipeDeduct(posDays.map(d=>d.date));
     closeModal('pos');
     await resyncIfClean();
     toast(`已匯入 ${r.days} 天 · ${r.orders} 筆訂單 · ${money(r.revenue)}`);
@@ -2058,6 +2226,16 @@ async function savePosOrders(day){
     const r=await callRpc("erp_pos_save_orders",{p_orders:rows});
     return (r&&r.saved)||0;
   }catch(e){ console.warn("訂單層存檔失敗",e); return 0; }
+}
+
+/* 配方扣料。沒填配方就等於沒事發生，所以不用判斷有沒有填。
+   失敗不算致命：明細和營收已經進去了，配方之後重跑就補得回來。 */
+async function recipeDeduct(dates){
+  if(!dates||!dates.length) return 0;
+  try{
+    const r=await callRpc("erp_recipe_deduct",{p_dates:dates});
+    return (r&&r.moves)||0;
+  }catch(e){ console.warn("配方扣料失敗",e); return 0; }
 }
 
 /* 匯入失敗要留在畫面上。
