@@ -386,6 +386,44 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
+/* 從微碧後台的「銷售報表」補登每日營收。
+   那份報表一天一列，只有金額和訂單數 —— 沒有品項明細，所以杯數、
+   分類、包材扣料都補不回來，只能補錢。
+
+   預設只填「原本沒有資料」的日子：已經有 POS 明細的日子，那邊的
+   數字是逐筆訂單加總出來的，而且分日方式跟後台報表不一定一致，
+   不該被蓋掉。真要蓋要明講 p_overwrite。 */
+create or replace function erp_fill_revenue(
+  p_rows      jsonb,
+  p_overwrite boolean default false
+) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  uid     uuid := erp_require_manager();
+  filled  int := 0;
+  skipped int := 0;
+  r       jsonb;
+  d       date;
+  amt     numeric;
+begin
+  for r in select * from jsonb_array_elements(coalesce(p_rows, '[]'::jsonb))
+  loop
+    d   := (r->>'date')::date;
+    amt := coalesce((r->>'amount')::numeric, 0);
+    if not p_overwrite and exists (select 1 from erp_revenue where revenue_on = d) then
+      skipped := skipped + 1;
+      continue;
+    end if;
+    insert into erp_revenue (revenue_on, amount, note, updated_by, updated_at)
+    values (d, amt, '後台銷售報表補登', uid, now())
+    on conflict (revenue_on) do update set
+      amount = excluded.amount, note = excluded.note,
+      updated_by = excluded.updated_by, updated_at = now();
+    filled := filled + 1;
+  end loop;
+  return jsonb_build_object('ok', true, 'filled', filled, 'skipped', skipped);
+end $$;
+
 create or replace function erp_delete_revenue(p_date date)
 returns jsonb
 language plpgsql security definer set search_path = public as $$

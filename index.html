@@ -357,8 +357,8 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   <div class="modal-sheet">
     <div class="modal-head"><span class="serif">匯入微碧報表</span><button onclick="closeModal('pos')">✕</button></div>
     <div class="modal-note">
-      iPad APP 匯出後會寄三個 CSV。<b>「訂單列表」必選</b>，
-      連「營運總表」一起選的話還能拿到分類和單品營收（可多選）。
+      <b>每天的資料</b>：iPad 寄來的三個 CSV，選「訂單列表」＋「營運總表」（可多選）。<br>
+      <b>補舊資料</b>：後台匯出的「銷售報表」，一天一列，只補營收。
     </div>
     <div class="field">
       <label>訂單列表 CSV</label>
@@ -1416,6 +1416,7 @@ function exportCSV(){
    已用 2026/09/07 的真實檔驗過：69 筆訂單、$6,663、26 個品項的數量
    全部對得上微碧自己的營運總表。 */
 let posDays=[], posItems=[], posCats=null, posFileName="", posFileHash="";
+let posMode="orders";   // orders = 訂單列表；salesreport = 後台的銷售報表（只補營收）
 
 function parseCSV(text){
   if(text.charCodeAt(0)===0xFEFF) text=text.slice(1);
@@ -1552,6 +1553,16 @@ async function posPickFile(input){
     toast("請選 CSV，不是 Excel 檔");return;
   }
   // 訂單列表是必要的；營運總表有選就順便拿分類和單品營收
+  // 後台匯出的「銷售報表」是另一種東西：一天一列，只有金額和訂單數
+  const report=files.find(f=>/銷售報表/.test(f.name));
+  if(report && !files.some(f=>/訂單列表/.test(f.name))){
+    posMode="salesreport"; posCats=null;
+    const buf=await readBuf(report);
+    posFileName=report.name; posFileHash=await sha256Hex(buf);
+    posBuildSalesReport(toRows(buf));
+    return;
+  }
+  posMode="orders";
   const order=files.find(f=>/訂單列表/.test(f.name)) || files[0];
   const total=files.find(f=>/營運總表/.test(f.name));
   posCats=null;
@@ -1563,6 +1574,62 @@ async function posPickFile(input){
   posFileName=order.name;
   posFileHash=await sha256Hex(buf);
   posBuild(toRows(buf));
+}
+
+/* 後台「銷售報表」：一天一列。欄位有一百多個，我們只要日期和金額。
+   注意它補不回品項明細 —— 杯數、分類、包材扣料都沒有。 */
+function posBuildSalesReport(rows){
+  const box=$("#pos-result");
+  const hdr=rows[0]||[];
+  const cD=hdr.indexOf("日期"), cA=hdr.indexOf("訂單總金額"), cN=hdr.indexOf("有效訂單");
+  if(cD<0||cA<0){
+    box.innerHTML=`<div class="pl-card"><div class="pl-row">
+      <span class="k" style="color:var(--alert)">格式不對</span>
+      <span class="v" style="font-size:13px">找不到「日期」或「訂單總金額」欄</span></div></div>`;
+    $("#pos-import-btn").style.display="none"; return;
+  }
+  posDays=[]; posItems=[];
+  rows.slice(1).forEach(r=>{
+    const m=(r[cD]||"").match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+    if(!m) return;
+    const d=`${m[1]}-${String(m[2]).padStart(2,"0")}-${String(m[3]).padStart(2,"0")}`;
+    const amt=posNum(r[cA]);
+    if(amt<=0) return;
+    posDays.push({date:d, revenue:amt, orders:cN>=0?posNum(r[cN]):0});
+  });
+  if(!posDays.length){
+    box.innerHTML=`<div class="pl-card"><div class="pl-row">
+      <span class="k" style="color:var(--alert)">讀不到任何日期</span></div></div>`;
+    $("#pos-import-btn").style.display="none"; return;
+  }
+  posDays.sort((a,b)=>a.date.localeCompare(b.date));
+  const rev=posDays.reduce((s,d)=>s+d.revenue,0);
+  const have=posDays.filter(d=>dailyRevenue.some(r=>r.date===d.date)).length;
+  box.innerHTML=`<div class="pl-card">
+    <div class="pl-row"><span class="k">來源</span><span class="v">後台銷售報表</span></div>
+    <div class="pl-row"><span class="k">日期範圍</span><span class="v">${posDays[0].date} ～ ${posDays[posDays.length-1].date}</span></div>
+    <div class="pl-row"><span class="k">會補上</span><span class="v">${posDays.length-have} 天</span></div>
+    <div class="pl-row"><span class="k">已有資料跳過</span><span class="v">${have} 天</span></div>
+    <div class="pl-row"><span class="k">合計</span><span class="v">${money(rev)}</span></div>
+  </div>
+  <div style="font-size:11px;color:var(--grey);line-height:1.6;margin-bottom:12px">
+    這份報表只有金額和訂單數，<b>補不回杯數、品項和分類</b>。<br>
+    已經有明細的日子會跳過，不會被蓋掉。
+  </div>`;
+  $("#pos-import-btn").style.display="block";
+}
+
+async function submitSalesReport(){
+  const btn=$("#pos-import-btn");btn.disabled=true;btn.textContent="補登中…";
+  try{
+    const r=await callRpc("erp_fill_revenue",{p_rows:posDays,p_overwrite:false});
+    btn.disabled=false;btn.textContent="確認匯入";
+    closeModal('pos'); await resyncIfClean();
+    toast(`補了 ${r.filled} 天營收${r.skipped?`，${r.skipped} 天原本就有跳過`:""}`);
+  }catch(err){
+    btn.disabled=false;btn.textContent="確認匯入";
+    toast("補登失敗："+(err.message||err.code||"請檢查連線"));
+  }
 }
 
 function posBuild(rows){
@@ -1632,6 +1699,7 @@ function posBuild(rows){
 async function submitPosImport(){
   if(!canWrite())return;
   if(!posDays.length){toast("沒有可匯入的資料");return;}
+  if(posMode==="salesreport") return submitSalesReport();
   if(!confirm(`確認匯入？\n${posDays.length} 天 · ${posItems.length} 個品項列\n這幾天的營收會被 POS 金額覆蓋。`))return;
   const btn=$("#pos-import-btn");btn.disabled=true;btn.textContent="匯入中…";
   try{
