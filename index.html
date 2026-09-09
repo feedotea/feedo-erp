@@ -1101,6 +1101,8 @@ async function cancelOrdered(code){
    分類已經由營運總表自動帶入，這裡只處理「對到哪個庫存品項」。
    按營收排序，讓店長先處理有份量的。 */
 let mapData=null;
+let pendingMapPos=null;      // 從 POS 建品項時，存完要自動對應回去
+const esc=x=>String(x||"").replace(/\\/g,"\\\\").replace(/'/g,"\\'");
 async function openPosMap(){
   $("#map-body").innerHTML=`<div class="empty"><div class="t">讀取中…</div></div>`;
   $("#modal-map").classList.remove("hidden");
@@ -1126,11 +1128,31 @@ function renderPosMap(){
         <div class="nm">${n.pos_name}</div>
         <div style="font-size:11px;color:var(--grey)">${n.category||"未分類"} · ${Number(n.qty)||0} 件${amt?" · "+money(amt):""}</div>
       </div>
-      <select class="txt-input" style="width:150px;padding:8px;font-size:13px"
-        onchange="savePosMap('${n.pos_name.replace(/'/g,"\\'")}',this.value)">${opts(n)}</select>
+      <div style="display:flex;gap:6px;align-items:center">
+        <select class="txt-input" style="width:132px;padding:8px;font-size:13px"
+          onchange="savePosMap('${esc(n.pos_name)}',this.value)">${opts(n)}</select>
+        ${n.item_code?"":`<button class="mini-btn" style="padding:8px 9px;font-size:11px"
+          onclick="createItemFromPos('${esc(n.pos_name)}','${esc(n.category||"")}')">＋建品項</button>`}
+      </div>
     </div>`;
   }).join("");
 }
+/* 新的限定款一直會出。每出一款要先建品項、再回來對應，還要怕打錯字。
+   這顆按鈕把兩步併一步：直接開品項編輯、帶好名稱和分類，存檔後
+   自動接回這個 POS 品名。 */
+function createItemFromPos(posName, posCat){
+  pendingMapPos = posName;
+  closeModal('map');
+  openItemEdit(null);
+  $("#it-name").value = posName;
+  // 微碧的分類對到 ERP 的分類；對不上就丟「周邊」，反正會用這條路的多半是周邊
+  const map = {"周邊":"周邊","袋子":"包材"};
+  itSel.cat = map[posCat] || "周邊";
+  itSel.unit = "件";
+  openItemChips();
+  toast("填成本後按新增，會自動對應回 POS");
+}
+
 async function savePosMap(posName, code){
   try{
     await callRpc("erp_pos_map_item",{p_pos_name:posName, p_item_code:code||null, p_ignored:false});
@@ -1290,6 +1312,17 @@ async function saveItemEdit(){
   }
   $("#it-save-btn").textContent=wasNew?"新增":"儲存";
   closeModal('item');
+  // 從 POS 對應介面過來的，存完直接接回去，不用再繞一圈
+  if(pendingMapPos){
+    const posName=pendingMapPos; pendingMapPos=null;
+    try{
+      await callRpc("erp_pos_map_item",{p_pos_name:posName,p_item_code:code,p_ignored:false});
+      toast(`已新增 ${name}，並對應「${posName}」`);
+    }catch(e){ toast(`已新增 ${name}，但對應失敗：${e.message||e.code}`); }
+    await resyncIfClean();
+    openPosMap();
+    return;
+  }
   await resyncIfClean();
   toast(wasNew?`已新增 ${name}`:`已更新 ${name}`);
 }
