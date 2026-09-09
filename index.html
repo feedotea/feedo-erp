@@ -2719,18 +2719,27 @@ function renderOrderStats(os){
       <div><div style="color:var(--grey);font-size:10px;letter-spacing:1px">平均幾件</div><b style="font-size:15px">${num(os.avg_items)}</b></div>
       <div><div style="color:var(--grey);font-size:10px;letter-spacing:1px">訂單數</div><b style="font-size:15px">${totalOrders.toLocaleString()}</b></div>
     </div></div>`;
-  /* 有買周邊的單值多少 —— 這是全頁最能說服人的一個數字。
-     要在結帳時多開一次口，得先知道那一句話值幾塊錢。 */
+  /* 有沒有買周邊，是兩種客人還是同一種多買了。
+     只比客單價會嚴重誤導：杯套本身 $480 起跳，有買的單當然高一截，
+     那是商品本身的價格，不是「買了周邊所以多花錢」。一定要把飲料
+     杯數擺在旁邊，才看得出真相 —— 這家店的真相是買周邊的人飲料
+     反而買得少，兩群人根本不一樣。 */
   if(num(lift.with_n) && num(lift.without_n)){
-    const diff=num(lift.with_avg)-num(lift.without_avg);
     const share=Math.round(num(lift.with_n)/(num(lift.with_n)+num(lift.without_n))*100);
+    const wd=num(lift.with_drinks), od=num(lift.without_drinks);
+    const same=Math.abs(wd-od)<0.15;
     html+=`<div class="exp-cat-row"><div style="font-size:12.5px;line-height:1.75">
-      有買周邊的單平均 <b>${money(lift.with_avg)}</b>，沒買的 <b>${money(lift.without_avg)}</b>
-      —— 差 <b style="color:var(--ok)">${money(diff)}</b>。
-      目前只有 <b>${share}%</b> 的單有買周邊。
-      <div style="color:var(--grey);font-size:11px;margin-top:6px">
-        每多讓 1% 的單買到周邊，一期約多 ${money(diff*totalOrders*0.01)}。</div>
-    </div></div>`;
+      <b>${share}%</b> 的單有買周邊（${Math.round(num(lift.with_n)).toLocaleString()} 單）。
+      <div style="margin-top:6px">
+        有買：${money(lift.with_avg)}／單、飲料 <b>${wd}</b> 杯<br>
+        沒買：${money(lift.without_avg)}／單、飲料 <b>${od}</b> 杯</div>
+      <div style="color:var(--grey);font-size:11px;margin-top:6px;line-height:1.7">
+        ${same
+          ? "兩邊飲料買得差不多，客單價的差就是周邊商品本身的價格。"
+          : (wd<od
+            ? "買周邊的人飲料反而買得少 —— 這是兩種客人，不是同一種多買了。客單價的差來自商品價格，不代表推周邊會讓人多買飲料。"
+            : "買周邊的人飲料也買得多。可能是同一群高消費客，也可能真的有帶動，要靠活動實測才分得出來。")}
+      </div></div></div>`;
   }
   html+=hd("單筆金額")+(os.bands||[]).map(b=>
     bar(b.band,num(b.orders),bandMax,Math.round(num(b.orders)/totalOrders*100)+"%")).join("");

@@ -199,12 +199,18 @@ begin
                                 'h', h, 'date', sales_on)
       from hcup order by cups desc, sales_on desc limit 1),
     'peak_typ', (select round(percentile_cont(0.5) within group (order by c)) from dpeak),
+    /* 有沒有買周邊，兩群人長什麼樣。
+       只比客單價會嚴重誤導：杯套本身就要 $480 起跳，有買的單當然
+       高一截，那不是「買了周邊所以多花錢」。要一起看飲料杯數才
+       看得出是同一群人多買了，還是根本是兩種客人。 */
     'mds_lift', (
       select jsonb_build_object(
-        'with_n',      count(*) filter (where has_mds),
-        'with_avg',    round(avg(total) filter (where has_mds)),
-        'without_n',   count(*) filter (where not has_mds),
-        'without_avg', round(avg(total) filter (where not has_mds)))
+        'with_n',        count(*) filter (where has_mds),
+        'with_avg',      round(avg(total)    filter (where has_mds)),
+        'with_drinks',   round(avg(n_drinks) filter (where has_mds), 2),
+        'without_n',     count(*) filter (where not has_mds),
+        'without_avg',   round(avg(total)    filter (where not has_mds)),
+        'without_drinks',round(avg(n_drinks) filter (where not has_mds), 2))
       from ob where n_items > 0)
   ) into v_out;
 
