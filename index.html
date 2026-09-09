@@ -1575,15 +1575,21 @@ async function loadMonthReport(){
   if(!dataReady||!isManager())return;
   try{
     const r=await callRpc("erp_month_report",{p_month:viewMonth});
-    if(r&&r.month===viewMonth){ monthReport=r; renderReport(); }
+    if(r&&r.month===viewMonth){ monthReport=r; renderReport(); renderRevenue(); }
   }catch(e){ console.warn("月報表讀取失敗",e); }
 }
 function renderReport(){
   const m=viewMonth;$("#rep-month").textContent=m;
   const big=$("#rep-month-big");if(big)big.textContent=fmtMonthLabel(m);
   const nb=$("#rep-next");if(nb)nb.disabled=(m>=curMonth());
-  // 當月營收 = 每日營收加總
-  const mRev=dailyRevenue.filter(r=>r.date.startsWith(m)).reduce((s,r)=>s+r.amt,0);
+  /* 當月營收。
+     開機只載最近 3 個月（erp_bootstrap），但月份切換器可以一直往前翻 ——
+     翻到窗外的月份時前端手上沒有那些日子，加總會是 0，畫面顯示「—」，
+     可是同一頁的杯數和訂單數是後端算的，照樣有數字。看起來就像「有
+     生意但沒有營收」。
+     後端 erp_month_report 本來就回傳整月營收，本地沒有就用它。 */
+  const localRev=dailyRevenue.filter(r=>r.date.startsWith(m)).reduce((s,r)=>s+r.amt,0);
+  const mRev = localRev || (monthReport && monthReport.month===m ? Number(monthReport.revenue)||0 : 0);
   const monthExp=expenses.filter(e=>e.date.startsWith(m));
   const opex=monthExp.filter(e=>e.cat!=="廠商貨款").reduce((s,e)=>s+e.amt,0);
   const paid=monthExp.filter(e=>e.cat==="廠商貨款").reduce((s,e)=>s+e.amt,0);
@@ -2218,7 +2224,15 @@ function renderRevenue(){
   const m=viewMonth;
   const big=$("#rev-month-big");if(big)big.textContent=fmtMonthLabel(m);
   const nb=$("#rev-next");if(nb)nb.disabled=(m>=curMonth());
-  const list=dailyRevenue.filter(r=>r.date.startsWith(m)).sort((a,b)=>b.date.localeCompare(a.date));
+  /* 本地沒有這個月（超出開機載入的範圍）就用後端月報表的逐日資料。
+     那份是唯讀的補充，所以不給刪除按鈕 —— 刪一筆要先把資料真的載進來。 */
+  let list=dailyRevenue.filter(r=>r.date.startsWith(m)).sort((a,b)=>b.date.localeCompare(a.date));
+  let readOnly=false;
+  if(!list.length && monthReport && monthReport.month===m && (monthReport.days||[]).length){
+    list=monthReport.days.map(d=>({date:String(d.date).slice(0,10), amt:Number(d.amt)||0}))
+                         .sort((a,b)=>b.date.localeCompare(a.date));
+    readOnly=true;
+  }
   const total=list.reduce((s,r)=>s+r.amt,0);
   $("#rev-month-total").textContent=money(total);
   $("#rev-days").textContent=list.length;
@@ -2230,7 +2244,7 @@ function renderRevenue(){
     const row=document.createElement("div");row.className="exp-item";
     row.innerHTML=`<div class="l"><div class="n">${r.date.slice(5)} 星期${wk}</div></div>
       <div class="r" style="display:flex;align-items:center;gap:10px"><div class="a">${money(r.amt)}</div>
-      <button class="del-btn" onclick="deleteRevenue('${r.date}')">刪除</button></div>`;
+      ${readOnly?"":`<button class="del-btn" onclick="deleteRevenue('${r.date}')">刪除</button>`}</div>`;
     box.appendChild(row);
   });
 }
