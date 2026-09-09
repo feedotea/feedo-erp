@@ -1702,6 +1702,37 @@ async function submitPosImport(){
   if(posMode==="salesreport") return submitSalesReport();
   if(!confirm(`確認匯入？\n${posDays.length} 天 · ${posItems.length} 個品項列\n這幾天的營收會被 POS 金額覆蓋。`))return;
   const btn=$("#pos-import-btn");btn.disabled=true;btn.textContent="匯入中…";
+
+  /* 一個月的檔一次送會有 5,000 多列、將近半 MB，容易撞到請求大小或
+     statement timeout。切成一天一次：每天約 200 列、20KB，而且某一天
+     失敗不會把整批拖下水。
+     每日檔（只有一天）維持原本行為，hash 不加後綴，才不會讓已經匯過
+     的檔看起來像新的。*/
+  if(posDays.length>1){
+    let done=0; const fails=[];
+    for(const day of posDays){
+      btn.textContent=`匯入中… ${done+1}/${posDays.length}（${day.date.slice(5)}）`;
+      const rows=posItems.filter(i=>i.date===day.date);
+      try{
+        const r=await callRpc("erp_pos_import",{
+          p_id:uuid(), p_file_name:posFileName,
+          p_file_hash:posFileHash+":"+day.date,
+          p_days:[day], p_rows:rows, p_source:"weiby",
+          // 分類是整份報表的加總，切成單日就對不起來，這條路不帶
+          p_cats:null});
+        if(r && r.ok!==false) done++;
+        else fails.push(`${day.date}：${(r&&r.message)||"已匯過"}`);
+      }catch(e){ fails.push(`${day.date}：${e.message||e.code||"失敗"}`); }
+    }
+    btn.disabled=false;btn.textContent="確認匯入";
+    if(fails.length) posShowError(`${done} 天成功、${fails.length} 天失敗`, fails.slice(0,10));
+    if(done){
+      closeModal('pos'); await resyncIfClean();
+      toast(`已匯入 ${done} 天`+(fails.length?`（${fails.length} 天失敗）`:""));
+    }
+    return;
+  }
+
   try{
     const r=await callRpc("erp_pos_import",{
       p_id:uuid(), p_file_name:posFileName, p_file_hash:posFileHash,
