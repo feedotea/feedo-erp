@@ -109,8 +109,10 @@ body{
 .order-row{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--line);background:var(--paper)}
 .order-row:last-child{border-bottom:none}
 .order-row .info .n{font-size:15px;font-weight:600}
-.order-row .info .s{font-size:11px;color:var(--grey);margin-top:1px}
-.order-row .qty{font-family:"Cormorant Garamond",Georgia,serif;font-size:22px;font-weight:600;color:var(--alert)}
+.order-row .info .s{font-size:11px;color:var(--grey);margin-top:2px}
+.order-row .qty{font-family:"Cormorant Garamond",Georgia,serif;font-size:22px;font-weight:600;color:var(--alert);flex-shrink:0;white-space:nowrap;padding-left:10px}
+.order-row .info{min-width:0}
+.order-row .info .s{line-height:1.45}
 .order-row .qty small{font-size:11px;color:var(--grey);font-family:inherit}
 .empty{text-align:center;padding:50px 20px;color:var(--grey)}
 .empty .ic{font-size:34px;margin-bottom:10px}
@@ -355,9 +357,22 @@ select.txt-input{appearance:none;-webkit-appearance:none}
       <div class="field" style="flex:1"><label>一天約用量<small style="color:var(--grey);font-weight:400"> · 手填預估</small></label><input class="txt-input" id="it-avg" type="number" inputmode="decimal" placeholder="0">
         <div id="it-avg-hint" style="font-size:10px;color:var(--ok);margin-top:4px;display:none"></div></div>
     </div>
+    <div style="display:flex;gap:10px">
+      <div class="field" style="flex:1"><label>到貨要幾天<small style="color:var(--grey);font-weight:400"> · 下單到收到</small></label><input class="txt-input" id="it-lead" type="number" inputmode="numeric" placeholder="3"></div>
+      <div class="field" style="flex:1"><label>叫一次撐幾天<small style="color:var(--grey);font-weight:400"> · 不含到貨</small></label><input class="txt-input" id="it-cover" type="number" inputmode="numeric" placeholder="14"></div>
+    </div>
     <div class="field"><label>供應商</label><input class="txt-input" id="it-supplier" placeholder="例：松霖"></div>
     <button class="btn-primary" onclick="saveItemEdit()" id="it-save-btn">新增</button>
     <button class="btn-primary" id="it-del-btn" style="background:none;color:var(--alert);border:1px solid var(--alert);margin-top:10px;display:none" onclick="deleteItemEdit()">刪除此品項</button>
+  </div>
+</div>
+
+<!-- 手動加品項到叫貨單 -->
+<div class="modal-overlay hidden" id="modal-add">
+  <div class="modal-sheet">
+    <div class="modal-head"><span class="serif">加品項到叫貨單</span><button onclick="closeModal('add')">✕</button></div>
+    <div class="modal-note">系統只會提醒快沒的東西。廠商剛好出車、下週有活動要多備，從這裡自己加。</div>
+    <div id="add-body"></div>
   </div>
 </div>
 
@@ -512,6 +527,11 @@ select.txt-input{appearance:none;-webkit-appearance:none}
 
 <!-- 營運分析 -->
 <div class="screen hidden" id="scr-analysis">
+  <div class="seg-tabs" id="an-seg">
+    <button data-v="3">近 3 個月</button>
+    <button class="on" data-v="6">近 6 個月</button>
+    <button data-v="12">近 12 個月</button>
+  </div>
   <div class="sec-eyebrow">經營建議 · <span id="an-range">—</span></div>
   <div id="an-insights"></div>
   <div class="sec-eyebrow">月趨勢 · 日均營收</div>
@@ -675,7 +695,10 @@ function mapItem(v){
     posRole: v.pos_role || null,
     orderUnit: v.order_unit || null,
     orderPack: Number(v.order_pack) || 0,
-    onOrder: !!v.on_order, note: v.note || "", sortOrder: v.sort_order || 0
+    leadDays: Number(v.lead_days) || 3,      // 下單到到貨幾天
+    coverDays: Number(v.cover_days) || 14,   // 叫一次要撐幾天
+    onOrder: !!v.on_order, onOrderQty: Number(v.on_order_qty) || 0,
+    note: v.note || "", sortOrder: v.sort_order || 0
   };
 }
 
@@ -730,6 +753,27 @@ function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");se
 function money(n){return "$"+Math.round(n).toLocaleString();}
 function status(it){if(it.bal<=it.safe)return 2;if(it.bal<=it.safe*1.3)return 1;return 0;}
 function daysLeft(it){if(!it.avgPerDay)return "—";return Math.floor(it.bal/it.avgPerDay);}
+/* 叫貨的唯一判斷。
+   舊版是 bal <= safe_qty：掉到安全量才叫。但叫了不會馬上到 ——
+   茶葉 3 天、封膜更久，那幾天等於在吃安全庫存，遇到週末就見底。
+   改成看「還能撐幾天」，撐不過到貨天數 + 2 天緩衝就該叫。
+   已經在路上的量算進來，不然同一樣東西會叫兩次。
+   沒有日用量的品項（新品、很少動的）退回舊的 bal <= safe。 */
+const ORDER_BUFFER_DAYS=2;
+/* 負庫存一律當 0。
+   庫存變負代表帳沒對上（POS 一直在扣，但沒盤過起始量），
+   不是真的欠了那麼多。照負數算缺口會把叫貨量灌爆 ——
+   紙杯 -5931 會叫成 9 箱，實際上盤完可能一箱都不用。 */
+function stockOf(it){ return Math.max(0, it.bal); }
+function coverDaysLeft(it){
+  if(!it.avgPerDay) return null;
+  return (stockOf(it) + (it.onOrderQty||0)) / it.avgPerDay;
+}
+function needsOrder(it){
+  const d=coverDaysLeft(it);
+  if(d===null) return it.bal<=it.safe;
+  return d <= it.leadDays + ORDER_BUFFER_DAYS;
+}
 
 /* 煮茶 */
 function renderSegTabs(){/* 時段已移除，保留空函式避免其他呼叫出錯 */}
@@ -779,11 +823,11 @@ function scheduleFlush(){
 function renderBrew(){
   const box=$("#brew-list"); if(!box) return;
   box.innerHTML="";
-  const THRESHOLD=6;
   teas().forEach(t=>{
     const n=brewToday[t.code]||0;
     const d=daysLeft(t);
-    const low = d!=="—" && d<=THRESHOLD;
+    // 跟叫貨頁用同一個判斷，否則這裡說「該叫貨」翻過去卻沒列出來
+    const low = needsOrder(t) && !orderedCodes.includes(t.code);
     const row=document.createElement("div");row.className="tea-row";
     row.innerHTML=
       `<div style="flex:1;min-width:0">
@@ -891,7 +935,7 @@ function renderTodo(){
   const pending=Object.values(brewToday).reduce((a,b)=>a+(b||0),0);
   if(!brewedToday && !pending) li.push("今天還沒記任何煮茶");
   if(isManager() && !dailyRevenue.some(r=>r.date===today)) li.push("今天還沒記營收");
-  const low=items.filter(i=>i.bal<=i.safe && !orderedCodes.includes(i.code));
+  const low=items.filter(i=>needsOrder(i) && !orderedCodes.includes(i.code));
   if(low.length) li.push(`<b>${low.length}</b> 個品項該叫貨了　<button class="go" onclick="nav('order')">去看</button>`);
   const stale=pendingOrders.filter(o=>{
     const d=(new Date(today)-new Date(String(o.ordered_on).slice(0,10)))/86400000;
@@ -1057,35 +1101,65 @@ async function submitLog(){
 /* 叫貨 */
 const G_PER_JIN=600; // 一斤=600g（舊資料沒設 order_pack 時的後備值）
 /* 叫貨要講廠商聽得懂的單位：茶葉論斤、封膜論卷、紙杯論箱。
-   order_pack = 一個採購單位等於幾個庫存單位，無條件進位到整數。 */
+   order_pack = 一個採購單位等於幾個庫存單位，無條件進位到整數。
+
+   叫多少：補到「撐得過到貨天數 + 補貨週期」，再扣掉在路上的。
+   舊版是 safe*1.5 - bal —— 那個數字跟實際用多快完全無關，
+   用量翻倍了還是叫一樣多。 */
 function orderQty(i){
-  const needBase=Math.ceil(i.safe*1.5-i.bal);   // 庫存單位的缺口
+  let needBase;
+  if(i.avgPerDay>0){
+    const target=i.avgPerDay*(i.leadDays+i.coverDays);
+    needBase=Math.ceil(target - stockOf(i) - (i.onOrderQty||0));
+  }else{
+    needBase=Math.ceil(i.safe*1.5 - stockOf(i));   // 沒用量資料時的後備
+  }
+  if(needBase<=0) needBase=1;                   // 進到這裡代表判斷過該叫，不能叫 0
   if(i.orderUnit && i.orderPack>0){
     const n=Math.ceil(needBase/i.orderPack);
     return {qty:n, unit:i.orderUnit, grams:n*i.orderPack};
   }
   return {qty:needBase, unit:i.unit, grams:needBase};
 }
+/* 叫這麼多之後大概能撐幾天 —— 讓店長一眼看出量對不對 */
+function coverAfter(i,o){
+  if(!i.avgPerDay) return null;
+  return Math.round((stockOf(i) + (i.onOrderQty||0) + o.grams) / i.avgPerDay);
+}
 function renderOrder(){
   const body=$("#order-body");
-  const lowAll=items.filter(i=>i.bal<=i.safe);
-  const toOrder=lowAll.filter(i=>!orderedCodes.includes(i.code)); // 還沒叫
-  const waiting=lowAll.filter(i=>orderedCodes.includes(i.code));  // 已叫等貨中
+  const toOrder=items.filter(i=>needsOrder(i) && !orderedCodes.includes(i.code));
+  const waiting=items.filter(i=>orderedCodes.includes(i.code));   // 已叫等貨中
   body.innerHTML="";
-  if(!toOrder.length && !waiting.length){
-    body.innerHTML=`<div class="empty"><div class="ic">✓</div><div class="t">目前都還充足，不用叫貨</div></div>`;return;
+  extraOrders=extraOrders.filter(x=>items.some(i=>i.code===x.code)); // 品項被下架就丟掉
+  const addBtn=`<div style="margin:14px 0 4px"><button class="mini-btn" style="width:100%" onclick="openAddOrder()">＋ 加其他品項</button></div>`;
+  if(!toOrder.length && !waiting.length && !extraOrders.length){
+    body.innerHTML=`<div class="empty"><div class="ic">✓</div><div class="t">目前都還充足，不用叫貨</div>
+      <div style="font-size:11px;margin-top:6px">每個品項都撐得過到貨天數</div></div>`+addBtn;return;
   }
   // 該叫貨區
-  if(toOrder.length){
-    const g={};toOrder.forEach(i=>{(g[i.supplier]=g[i.supplier]||[]).push(i);});
+  const lines=orderLines();
+  if(lines.length){
+    const g={};lines.forEach(L=>{(g[L.item.supplier]=g[L.item.supplier]||[]).push(L);});
     Object.entries(g).forEach(([sup,list])=>{
       const d=document.createElement("div");d.className="supplier-grp";let rows="";
-      list.forEach(i=>{const o=orderQty(i);
+      list.forEach(({item:i,o,manual})=>{
         // 茶葉一律用「包」顯示，跟庫存頁和盤點頁一致（叫貨量本來就是「斤」）
-        const u=i.tea?"包":i.unit, b=i.tea?Math.round(i.bal/i.packG*10)/10:i.bal, sf=i.tea?Math.round(i.safe/i.packG):i.safe;
-        rows+=`<div class="order-row"><div class="info"><div class="n">${i.name}</div>
-        <div class="s">剩 ${b}${u} · 安全 ${sf}${u}</div></div>
-        <div class="qty">${o.qty}<small> ${o.unit}</small></div></div>`;});
+        const u=i.tea?"包":i.unit, b=i.tea?Math.round(i.bal/i.packG*10)/10:i.bal;
+        const left=coverDaysLeft(i), after=coverAfter(i,o), neg=i.bal<0;
+        const sub = neg
+          ? `<span style="color:var(--alert)">庫存是負的（${b}${u}）· 先盤點再叫，這個數量只是估的</span>`
+          : manual
+          ? `手動加的 · 剩 ${b}${u}`
+          : (left===null
+              ? `剩 ${b}${u} · 沒有用量資料，用安全庫存判斷`
+              : `剩 ${b}${u}，還能撐 <b>${Math.floor(left)}</b> 天 · 到貨要 ${i.leadDays} 天`);
+        rows+=`<div class="order-row"><div class="info"><div class="n">${i.name}${manual?' <span style="font-size:10px;color:var(--grey)">手動</span>':''}</div>
+        <div class="s">${sub}</div></div>
+        <div class="qty" style="text-align:right">${o.qty}<small> ${o.unit}</small>
+          ${after&&!manual?`<div style="font-size:10px;color:var(--grey);font-weight:400">叫完撐 ${after} 天</div>`:""}
+          ${manual?`<button class="brew-undo" style="font-size:13px" onclick="dropExtra('${i.code}')" title="移除">✕</button>`:""}
+        </div></div>`;});
       d.innerHTML=`<div class="supplier-hd"><span class="nm">${sup}</span>
         <button class="copy-btn" onclick="copyOrder('${sup}')">複製並標記已叫</button></div>${rows}`;
       body.appendChild(d);
@@ -1110,18 +1184,68 @@ function renderOrder(){
     });
     body.appendChild(wc);
   }
+  body.insertAdjacentHTML("beforeend", addBtn);
 }
+
+/* 手動加的品項。
+   系統只會提醒「快沒了」的東西，但有時候是廠商剛好要出車、或是
+   下週有活動要多備 —— 該叫什麼人比系統清楚，不能只給系統決定。
+   只放在記憶體裡，叫完就清掉，不需要進資料庫。 */
+let extraOrders=[];   // [{code, qty, unit}]
+function orderLines(){
+  const auto=items.filter(i=>needsOrder(i)&&!orderedCodes.includes(i.code))
+                  .map(i=>({item:i,o:orderQty(i),manual:false}));
+  const extra=extraOrders.filter(x=>!auto.some(L=>L.item.code===x.code))
+    .map(x=>{
+      const i=items.find(y=>y.code===x.code); if(!i)return null;
+      const grams=(i.orderUnit&&x.unit===i.orderUnit&&i.orderPack>0)?x.qty*i.orderPack:x.qty;
+      return {item:i,o:{qty:x.qty,unit:x.unit,grams},manual:true};
+    }).filter(Boolean);
+  return auto.concat(extra);
+}
+function openAddOrder(){
+  const box=$("#add-body");
+  box.innerHTML=items.slice().sort((a,b)=>a.name.localeCompare(b.name,"zh-Hant")).map(i=>{
+    const u=i.orderUnit||i.unit;
+    const left=coverDaysLeft(i);
+    return `<div class="st-row"><div style="flex:1;min-width:0">
+      <div class="nm">${i.name}</div>
+      <div style="font-size:11px;color:var(--grey)">${i.supplier||"—"}${left!==null?` · 還能撐 ${Math.floor(left)} 天`:""}</div></div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <input class="txt-input" style="width:64px;padding:8px;text-align:center" type="number" min="1" step="1"
+               id="add-q-${i.code}" placeholder="0" inputmode="numeric">
+        <span style="font-size:12px;color:var(--grey);width:26px">${u}</span>
+        <button class="mini-btn" style="padding:8px 10px" onclick="addExtra('${i.code}','${u}')">加入</button>
+      </div></div>`;
+  }).join("");
+  $("#modal-add").classList.remove("hidden");
+}
+function addExtra(code,unit){
+  const el=$("#add-q-"+code), q=parseFloat(el&&el.value);
+  if(!(q>0)){toast("要填數量");return;}
+  const it=items.find(i=>i.code===code);
+  extraOrders=extraOrders.filter(x=>x.code!==code);
+  extraOrders.push({code,qty:q,unit});
+  closeModal("add");renderOrder();
+  toast(`${it.name} ${q}${unit} 已加進叫貨單`);
+}
+function dropExtra(code){
+  extraOrders=extraOrders.filter(x=>x.code!==code);
+  renderOrder();
+}
+
 async function copyOrder(sup){
-  const list=items.filter(i=>i.bal<=i.safe&&i.supplier===sup&&!orderedCodes.includes(i.code));
-  if(!list.length){toast("這家沒有要叫的品項");return;}
+  const lines=orderLines().filter(L=>L.item.supplier===sup);
+  if(!lines.length){toast("這家沒有要叫的品項");return;}
+  const list=lines.map(L=>L.item);
   let msg=`${sup} 您好，${SHOP_NAME} 叫貨：\n`,est=0;
   const rows=[];
-  list.forEach(i=>{
-    const o=orderQty(i);
+  lines.forEach(({item:i,o})=>{
     msg+=`・${i.name} ${o.qty}${o.unit}\n`;
     est+=o.grams*(i.cost||0);
     rows.push({id:uuid(),code:i.code,qty:o.qty,unit:o.unit,supplier:sup});
   });
+  extraOrders=extraOrders.filter(x=>!lines.some(L=>L.item.code===x.code));
   msg+="麻煩了，謝謝！";
   if(navigator.clipboard)navigator.clipboard.writeText(msg);
   if(!canWrite()){toast("已複製訊息，但未連上雲端，沒有標記已叫");return;}
@@ -1296,6 +1420,8 @@ function openItemEdit(code){
   $("#it-safe").value=it?it.safe:"";
   $("#it-cost").value=it?it.cost:"";
   $("#it-avg").value=it?(it.avgManual??it.avgPerDay):"";
+  $("#it-lead").value =it?it.leadDays:"";
+  $("#it-cover").value=it?it.coverDays:"";
   const ah=$("#it-avg-hint");
   if(it&&it.avgIsActual){ah.style.display="block";ah.textContent=`目前已改用實際數據 ${it.avgPerDay}/天（近 28 天），手填值暫時不生效`;}
   else ah.style.display="none";
@@ -1340,6 +1466,8 @@ async function saveItemEdit(){
       code, name, cat:itSel.cat, unit:itSel.unit, safe_qty:safe, cost,
       supplier: supplier==="—"?null:supplier, is_tea:itSel.tea,
       pack_g: prev?prev.packG:PACK_G, avg_per_day_manual:avg, note: prev?prev.note:"",
+      lead_days:  Math.max(0, parseInt($("#it-lead").value)  || (prev?prev.leadDays:3)),
+      cover_days: Math.max(1, parseInt($("#it-cover").value) || (prev?prev.coverDays:14)),
       sort_order: prev?prev.sortOrder:0
     }});
     // 庫存欄有動 → 寫成一筆盤點調整（庫存是帳，不能直接覆蓋數字）
@@ -2082,7 +2210,17 @@ async function deleteRevenue(date){
    沒人會照做），資料也不用送出店外。每條建議一定要有「數字 +
    該做什麼」——只講現象不講動作，看完還是不知道要幹嘛。
    --------------------------------------------------------------- */
-let analytics=null, anAt=0, anLoading=false;
+/* 期間分開快取：切回去不用重打，但每個期間各自 60 秒後過期 */
+let anMonths=6, anCache={}, anLoading=false;
+let analytics=null, anAt=0;
+function setAnMonths(n){
+  if(anMonths===n)return;
+  anMonths=n;
+  [...document.querySelectorAll("#an-seg button")].forEach(b=>b.classList.toggle("on",+b.dataset.v===n));
+  const c=anCache[n];
+  if(c && Date.now()-c.at<60000){ analytics=c.data; anAt=c.at; renderAnalysis(); }
+  else { analytics=null; loadAnalytics(true); }
+}
 const WDAY=["日","一","二","三","四","五","六"];
 const num=x=>Number(x)||0;
 const eh=s=>String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
@@ -2094,10 +2232,13 @@ async function loadAnalytics(force){
   if(analytics && !force && Date.now()-anAt<60000) return renderAnalysis();
   if(anLoading)return;
   anLoading=true;
+  const want=anMonths;
   if(!analytics)$("#an-insights").innerHTML=`<div class="empty"><div class="t">分析中…</div></div>`;
   try{
-    analytics=await callRpc("erp_analytics",{p_months:6});
-    anAt=Date.now();
+    const r=await callRpc("erp_analytics",{p_months:want});
+    if(want!==anMonths)return;          // 期間又被切走了，這份結果已經過時
+    analytics=r; anAt=Date.now();
+    anCache[want]={data:r,at:anAt};
     renderAnalysis();
   }catch(e){
     $("#an-insights").innerHTML=`<div class="empty"><div class="ic">⚠</div><div class="t">${eh(e.message||"讀取失敗")}</div></div>`;
@@ -2224,7 +2365,9 @@ function buildInsights(a){
   /* 8. 資料缺口。這些沒補，上面的毛利就只是「毛利」，不是淨利。 */
   const gaps=[];
   if(!expenses.length) gaps.push("開銷一筆都沒記（房租、水電、人事）");
-  if(items.length && items.every(i=>!num(i.bal))) gaps.push("庫存還是 0，沒盤過");
+  // 有品項是負庫存，代表 POS 一直在扣、卻沒有起始數量 —— 一樣是沒盤過
+  if(items.length && (items.every(i=>!num(i.bal)) || items.some(i=>num(i.bal)<0)))
+    gaps.push("庫存沒盤過（有品項是負的，代表一直在扣但沒有起始量）");
   if(gaps.length){
     add("risk","損益還算不完整",
       gaps.join("；")+"。營收和物料成本是準的，但扣完固定開銷之後真正剩多少，現在算不出來。","",
@@ -2232,6 +2375,8 @@ function buildInsights(a){
   }
   return R;
 }
+
+$("#an-seg").addEventListener("click",e=>{if(e.target.dataset.v)setAnMonths(+e.target.dataset.v);});
 
 function renderAnalysis(){
   const a=analytics; if(!a)return;

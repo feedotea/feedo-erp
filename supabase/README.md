@@ -14,6 +14,7 @@
 | 4 | `04_seed.sql` | 匯入 16 個品項主檔 |
 | 5 | `05_pos_import.sql` | 微碧 POS 報表匯入（表 + RPC + 權限） |
 | 6 | `06_analytics.sql` | 營運分析（`erp_analytics`，只讀，店長限定） |
+| 7 | `07_ordering.sql` | 叫貨改用到貨天數（`lead_days`/`cover_days`、在途量） |
 
 順序不能顛倒（03 要先有 01、02 建立的物件才收得掉權限）。
 
