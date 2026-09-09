@@ -231,7 +231,7 @@ select.txt-input{appearance:none;-webkit-appearance:none}
 </div>
 <div class="modebar" id="modebar">
   <button class="on" id="mode-stock" onclick="setMode('stock')">今天 TODAY</button>
-  <button id="mode-money" onclick="setMode('money')">本月 MONTH</button>
+  <button id="mode-money" onclick="setMode('money')">帳務 BOOKS</button>
 </div>
 
 <div id="sync-badge" style="display:none;background:#C8902A;color:#1A1A1A;font-size:12px;letter-spacing:.5px;padding:8px 16px;text-align:center;font-weight:600"></div>
@@ -293,6 +293,7 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   </div>
   <div style="display:flex;gap:8px;margin-bottom:8px">
     <button class="mini-btn" style="flex:1" onclick="openWaste()">🗑 記損耗/報廢</button>
+    <button class="mini-btn" style="flex:1" id="btn-stocktake" onclick="openStocktake()">📋 月度盤點</button>
   </div>
   <div style="display:flex;gap:8px;margin-bottom:12px">
     <button class="mini-btn" style="flex:1;border-color:var(--ink);color:var(--ink)" id="btn-new-item" onclick="openItemEdit(null)">＋ 新增品項</button>
@@ -362,7 +363,8 @@ select.txt-input{appearance:none;-webkit-appearance:none}
 
 <!-- 盤點 modal -->
 <div class="screen hidden" id="scr-stocktake">
-  <div class="sec-eyebrow">月度盤點</div>
+  <div class="date-bar"><span>月度盤點</span>
+    <button class="mini-btn" onclick="nav('inv')">← 回庫存</button></div>
   <div style="font-size:12px;color:var(--grey);line-height:1.6;margin-bottom:12px">
     實際數一次庫存填進去，系統算出跟帳面的差額並寫成一筆調整。<br>
     茶葉填「幾包」就好（一包 100g），不用秤到公克。只填你數過的，沒填的不動。
@@ -428,7 +430,17 @@ select.txt-input{appearance:none;-webkit-appearance:none}
     <div class="pl-row" style="opacity:.6"><span class="k">（本月付給廠商<small style="color:var(--grey);display:block;font-size:10px;letter-spacing:.5px">現金流，不是成本</small></span><span class="v" id="pl-paid">—</span></div>
     <div class="pl-row profit"><span class="k">毛利</span><span class="v" id="pl-profit">—</span></div>
   </div>
-  <div style="margin-bottom:14px"><button class="mini-btn" onclick="exportCSV()">匯出 CSV 給記帳士</button></div>
+  <div style="display:flex;gap:8px;margin-bottom:14px">
+    <button class="mini-btn" style="flex:1" onclick="exportCSV()">匯出 CSV</button>
+    <button class="mini-btn" style="flex:1;border-color:var(--ink);color:var(--ink)" onclick="openPosImport()">⬆ 匯入微碧報表</button>
+  </div>
+  <div class="sec-eyebrow">每日營收</div>
+  <div class="summary-strip">
+    <div class="stat"><div class="v serif" id="rev-month-total">$0</div><div class="k">當月營收</div></div>
+    <div class="stat"><div class="v serif" id="rev-days">0</div><div class="k">已記天數</div></div>
+    <div class="stat"><div class="v serif" id="rev-avg">$0</div><div class="k">日均</div></div>
+  </div>
+  <div class="card" id="rev-list" style="margin-bottom:14px"></div>
   <div class="sec-eyebrow">開銷分類佔比</div>
   <div class="card" id="exp-breakdown"></div>
   <div class="sec-eyebrow">當月所有開銷</div>
@@ -441,26 +453,6 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   <div class="sec-eyebrow">廠商月結對帳 · <span id="recon-month"></span></div>
   <div class="modal-note" style="margin:0 4px 12px">每次進貨自動累加，月底跟廠商帳單對。差異標紅，方便你抓帳。</div>
   <div id="recon-body"></div>
-  <div class="scroll-hint"></div>
-</div>
-
-<!-- 營收 -->
-<div class="screen hidden" id="scr-revenue">
-  <div class="month-switch">
-    <button onclick="changeReportMonth(-1)">◀</button>
-    <span id="rev-month-big">—</span>
-    <button onclick="changeReportMonth(1)" id="rev-next">▶</button>
-  </div>
-  <div class="summary-strip">
-    <div class="stat"><div class="v serif" id="rev-month-total">$0</div><div class="k">當月營收</div></div>
-    <div class="stat"><div class="v serif" id="rev-days">0</div><div class="k">已記天數</div></div>
-    <div class="stat"><div class="v serif" id="rev-avg">$0</div><div class="k">日均</div></div>
-  </div>
-  <div style="display:flex;gap:8px;margin-bottom:12px">
-    <button class="mini-btn" style="flex:1;border-color:var(--ink);color:var(--ink)" onclick="openPosImport()">⬆ 匯入微碧報表</button>
-  </div>
-  <div class="sec-eyebrow">每日營收 · 打烊在煮茶頁填</div>
-  <div class="card" id="rev-list"></div>
   <div class="scroll-hint"></div>
 </div>
 
@@ -575,6 +567,7 @@ function applyRole(){
   const mgr = isManager();
   // 店員只有「今天」一種模式，一顆按鈕的切換列沒有意義，整條收掉
   $("#modebar").style.display    = mgr ? "" : "none";
+  $("#btn-stocktake").style.display = mgr ? "" : "none";
   $("#mode-money").style.display = mgr ? "" : "none";
   $("#st-val-box").style.display = mgr ? "" : "none";   // 庫存總值 = 成本資訊
   // 每天的營業額和進貨單價都是錢，店員不該看到
@@ -1520,7 +1513,7 @@ function renderStocktake(){
   });
 }
 // 舊名稱，避免其他地方還在呼叫
-function openStocktake(){ setMode('money'); nav('stocktake'); }
+function openStocktake(){ nav('stocktake'); }   // 盤點屬於庫存，不切模式
 
 function calcDiff(code){
   const it=items.find(i=>i.code===code);
@@ -1673,13 +1666,14 @@ async function deleteRevenue(date){
    舊的分法把每天要做的事散在兩個模式裡，每月一次的也散在兩邊，
    所以會一直來回切。 */
 const STOCK_TABS=[["brew","🍵","煮茶"],["order","⚑","叫貨"],["log","✎","用量"],["inv","▦","庫存"]];
-const MONEY_TABS=[["stocktake","📋","盤點"],["revenue","$","營收"],["expense","✎","開銷"],["report","▤","報表"],["recon","☰","月結"]];
+/* 帳務只留真正是「帳」的三格。
+   盤點是庫存作業，搬回庫存頁；每日營收清單併進報表頁。 */
+const MONEY_TABS=[["report","▤","報表"],["expense","✎","開銷"],["recon","☰","月結"]];
 let mode="stock";
 function setMode(m){
   if(m==="money" && !isManager()){toast("帳務功能限店長使用");return;}
   mode=m;$("#mode-stock").classList.toggle("on",m==="stock");$("#mode-money").classList.toggle("on",m==="money");
   $("#appTitle").textContent=m==="stock"?"Daybook":"Ledger";
-  if(m==="money") renderStocktake();
   buildTabs();nav((m==="stock"?STOCK_TABS:MONEY_TABS)[0][0]);
 }
 function buildTabs(){
@@ -1692,16 +1686,15 @@ function buildTabs(){
 let curScreen="brew";
 function nav(scr){
   curScreen=scr;
-  ["brew","log","order","inv","expense","report","recon","revenue","stocktake"].forEach(s=>$("#scr-"+s).classList.toggle("hidden",s!==scr));
+  ["brew","log","order","inv","expense","report","recon","stocktake"].forEach(s=>$("#scr-"+s).classList.toggle("hidden",s!==scr));
   [...document.querySelectorAll(".tab")].forEach(t=>t.classList.toggle("on",t.dataset.scr===scr));
   $("#submit-brew").classList.toggle("hidden",scr!=="brew");
   $("#submit-log").classList.toggle("hidden",scr!=="log");
   $("#submit-expense").classList.toggle("hidden",scr!=="expense");
   $("#submit-stocktake").classList.toggle("hidden",scr!=="stocktake");
-  if(scr==="report"){renderReport();loadMonthReport();}
+  if(scr==="report"){renderReport();renderRevenue();loadMonthReport();}
   if(scr==="expense")renderPay();
   if(scr==="recon")renderRecon();
-  if(scr==="revenue")renderRevenue();
   if(scr==="stocktake")renderStocktake();
 }
 
