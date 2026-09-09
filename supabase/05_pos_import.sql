@@ -170,11 +170,13 @@ begin
    where kind = 'use' and note = 'POS自動扣料' and occurred_on = any(dates);
 
   insert into erp_stock_moves (id, item_code, kind, qty_delta, occurred_on, note, created_by)
-  select gen_random_uuid(), i.code, 'use', -u.q, u.d, 'POS自動扣料', uid
+  -- 別名不能叫 d：函式裡已經有一個 jsonb 變數叫 d（跑營收迴圈用的），
+  -- 撞名會讓 PostgreSQL 報 column reference "d" is ambiguous
+  select gen_random_uuid(), i.code, 'use', -u.q, u.sd, 'POS自動扣料', uid
   from (
-    select d, role, sum(q) as q from (
+    select sd, role, sum(q) as q from (
       -- 紙杯和封膜：飲料杯數，扣掉自帶環保杯的
-      select sales_on as d, r.role, qty as q
+      select sales_on as sd, r.role, qty as q
         from erp_pos_sales, (values ('cup'),('film')) as r(role)
        where sales_on = any(dates)
          and (options ~ '甜|冰' or pos_name ~ '茶|烏龍')
@@ -184,7 +186,7 @@ begin
       select sales_on, 'bag', qty
         from erp_pos_sales
        where sales_on = any(dates) and pos_name like '%杯袋%'
-    ) z group by d, role
+    ) z group by sd, role
   ) u
   join erp_items i on i.pos_role = u.role and i.active
   where u.q > 0;
