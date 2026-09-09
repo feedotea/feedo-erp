@@ -1156,8 +1156,10 @@ function refreshSummary(){
 }
 
 /* ===== 品項 新增/編輯/刪除 ===== */
-const IT_CATS=["茶葉","糖類","乳品","配料","包材"];
-const IT_UNITS=["g","kg","瓶","L","個","包","箱","捲","組"];
+/* 周邊佔營收 33.8%（T-Shirt、帽子、杯套、貼紙），比任何一個飲料
+   品類都大，但原本連分類都沒有，等於整塊在系統外。 */
+const IT_CATS=["茶葉","糖類","乳品","配料","包材","周邊"];
+const IT_UNITS=["g","kg","瓶","L","個","件","包","箱","捲","組"];
 let editingCode=null, itSel={cat:"茶葉",unit:"g",tea:false};
 function openItemEdit(code){
   editingCode=code;
@@ -1201,7 +1203,7 @@ async function saveItemEdit(){
 
   let code=editingCode;
   if(!code){
-    const prefix={"茶葉":"TEA","糖類":"SUG","乳品":"MLK","配料":"TOP","包材":"PKG"}[itSel.cat]||"ITM";
+    const prefix={"茶葉":"TEA","糖類":"SUG","乳品":"MLK","配料":"TOP","包材":"PKG","周邊":"MDS"}[itSel.cat]||"ITM";
     const nums=items.filter(x=>x.code.startsWith(prefix)).map(x=>parseInt(x.code.split("-")[1])||0);
     code=`${prefix}-${String((Math.max(0,...nums)+1)).padStart(2,"0")}`;
   }
