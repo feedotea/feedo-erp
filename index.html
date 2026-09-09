@@ -1707,14 +1707,31 @@ async function submitPosImport(){
       p_id:uuid(), p_file_name:posFileName, p_file_hash:posFileHash,
       p_days:posDays, p_rows:posItems, p_source:"weiby", p_cats:posCats});
     btn.disabled=false;btn.textContent="確認匯入";
-    if(r&&r.ok===false){toast("⚠ "+(r.message||"匯入失敗"));return;}
+    if(r&&r.ok===false){posShowError(r.message||"匯入失敗", r);return;}
     closeModal('pos');
     await resyncIfClean();
     toast(`已匯入 ${r.days} 天 · ${r.orders} 筆訂單 · ${money(r.revenue)}`);
   }catch(err){
     btn.disabled=false;btn.textContent="確認匯入";
-    toast("匯入失敗："+(err.message||err.code||"請檢查連線"));
+    posShowError(err.message||err.code||"請檢查連線", err);
   }
+}
+
+/* 匯入失敗要留在畫面上。
+   原本只跳兩秒的 toast —— 錯誤一閃就沒，使用者只看到「按了沒反應」，
+   前面那個 column reference "d" is ambiguous 就是這樣被藏了好幾輪。*/
+function posShowError(msg, raw){
+  const box=$("#pos-result"); if(!box) return;
+  const detail = raw ? JSON.stringify(raw).slice(0,400) : "";
+  box.insertAdjacentHTML("afterbegin",
+    `<div style="border:1px solid var(--alert);border-left:3px solid var(--alert);
+       background:#fbeaea;border-radius:2px;padding:12px 14px;margin-bottom:12px">
+       <div style="font-size:12px;letter-spacing:2px;color:var(--alert);font-weight:600;margin-bottom:6px">匯入失敗</div>
+       <div style="font-size:13px;line-height:1.6;word-break:break-all">${msg}</div>
+       ${detail?`<details style="margin-top:8px"><summary style="font-size:11px;color:var(--grey);cursor:pointer">技術細節</summary>
+         <div style="font-size:10px;color:var(--grey);word-break:break-all;margin-top:6px">${detail}</div></details>`:""}
+     </div>`);
+  box.scrollIntoView({behavior:"smooth",block:"nearest"});
 }
 
 /* ===== 盤點 =====
