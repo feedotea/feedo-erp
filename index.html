@@ -541,6 +541,11 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   <div class="card" style="overflow-x:auto"><table class="mini-tbl" id="an-dow"></table></div>
   <div class="sec-eyebrow">賣什麼賺錢</div>
   <div class="card" style="overflow-x:auto"><table class="mini-tbl" id="an-items"></table></div>
+  <div class="sec-eyebrow">時段 · 幾點忙</div>
+  <div class="card"><div class="trend" id="an-hours" style="height:118px"></div></div>
+  <div class="card" id="an-hour-note" style="padding:0"></div>
+  <div class="sec-eyebrow">一單買多少</div>
+  <div class="card" id="an-basket"></div>
   <div class="sec-eyebrow">客人怎麼點</div>
   <div class="card" id="an-opts"></div>
   <div class="sec-eyebrow">退燒品項</div>
@@ -1679,7 +1684,7 @@ function exportCSV(){
      交易列表 只有付款金額，沒有品項
    已用 2026/09/07 的真實檔驗過：69 筆訂單、$6,663、26 個品項的數量
    全部對得上微碧自己的營運總表。 */
-let posDays=[], posItems=[], posCats=null, posFileName="", posFileHash="";
+let posDays=[], posItems=[], posOrders=[], posCats=null, posFileName="", posFileHash="";
 let posMode="orders";   // orders = 訂單列表；salesreport = 後台的銷售報表（只補營收）
 
 function parseCSV(text){
@@ -1820,7 +1825,7 @@ async function posPickFile(input){
   // 後台匯出的「銷售報表」是另一種東西：一天一列，只有金額和訂單數
   const report=files.find(f=>/銷售報表/.test(f.name));
   if(report && !files.some(f=>/訂單列表/.test(f.name))){
-    posMode="salesreport"; posCats=null;
+    posMode="salesreport"; posCats=null; posOrders=[];
     const buf=await readBuf(report);
     posFileName=report.name; posFileHash=await sha256Hex(buf);
     posBuildSalesReport(toRows(buf));
@@ -1829,7 +1834,7 @@ async function posPickFile(input){
   posMode="orders";
   const order=files.find(f=>/訂單列表/.test(f.name)) || files[0];
   const total=files.find(f=>/營運總表/.test(f.name));
-  posCats=null;
+  posCats=null; posOrders=[];
   if(total){
     const cats=parseCategoryAnalysis(toRows(await readBuf(total)));
     posCats=cats.length?cats:null;
@@ -1914,20 +1919,33 @@ function posBuild(rows){
     return;
   }
 
-  const dayMap={}; posItems=[]; let skipped=0;
+  const cKind=col("訂單類別");
+  const dayMap={}; posItems=[]; posOrders=[]; let skipped=0;
   rows.slice(1).forEach(r=>{
     if(cStat>=0 && r[cStat] && r[cStat]!=="完成"){ skipped++; return; }  // 取消的不算
     const paid=r[cPaid]||"";
-    const m=paid.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+    const m=paid.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
     if(!m){ skipped++; return; }
     const d=`${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
     if(!dayMap[d]) dayMap[d]={date:d,revenue:0,orders:0};
-    dayMap[d].revenue+=posNum(r[cTotal]);
+    const total=posNum(r[cTotal]);
+    dayMap[d].revenue+=total;
     dayMap[d].orders++;
-    parseOrderItems(r[cItems]).forEach(it=>{
-      posItems.push({date:d, order_no:cNo>=0?r[cNo]:null,
+    const its=parseOrderItems(r[cItems]);
+    const no=cNo>=0?String(r[cNo]||"").trim():"";
+    its.forEach(it=>{
+      posItems.push({date:d, order_no:no||null,
                      name:it.name, qty:it.qty, options:it.options});
     });
+    /* 訂單層：時段和單筆分析要用。
+       時間存台北當地字串，後端存 timestamp（不帶時區）—— 報表都是
+       本地概念，轉時區只會多一個出錯的地方。 */
+    if(no){
+      const hh=m[4]?`${m[4].padStart(2,"0")}:${m[5]}:${m[6]||"00"}`:null;
+      posOrders.push({date:d, no, at:hh?`${d} ${hh}`:null, total,
+                      items:its.reduce((a,b)=>a+b.qty,0),
+                      channel:cKind>=0?(r[cKind]||null):null});
+    }
   });
 
   posDays=Object.values(dayMap).sort((a,b)=>a.date.localeCompare(b.date));
@@ -1984,7 +2002,11 @@ async function submitPosImport(){
           p_days:[day], p_rows:rows, p_source:"weiby",
           // 分類是整份報表的加總，切成單日就對不起來，這條路不帶
           p_cats:null});
-        if(r && r.ok!==false) done++;
+        if(r && r.ok!==false){
+          done++;
+          // 訂單層獨立存。重匯舊檔就是為了補這個，所以匯過的日子照樣送。
+          await savePosOrders(day.date);
+        }
         else fails.push(`${day.date}：${(r&&r.message)||"已匯過"}`);
       }catch(e){ fails.push(`${day.date}：${e.message||e.code||"失敗"}`); }
     }
@@ -2003,6 +2025,7 @@ async function submitPosImport(){
       p_days:posDays, p_rows:posItems, p_source:"weiby", p_cats:posCats});
     btn.disabled=false;btn.textContent="確認匯入";
     if(r&&r.ok===false){posShowError(r.message||"匯入失敗", r);return;}
+    await savePosOrders(null);
     closeModal('pos');
     await resyncIfClean();
     toast(`已匯入 ${r.days} 天 · ${r.orders} 筆訂單 · ${money(r.revenue)}`);
@@ -2010,6 +2033,20 @@ async function submitPosImport(){
     btn.disabled=false;btn.textContent="確認匯入";
     posShowError(err.message||err.code||"請檢查連線", err);
   }
+}
+
+/* 訂單層資料。分開送有兩個好處：
+   不用動 erp_pos_import（那支有自動扣料和重匯保護，改簽名等於重寫），
+   而且已經匯過的日子重匯一次就能把時段補上，不會被 file_hash 擋掉。
+   失敗不算致命 —— 明細和營收已經進去了，時段少一天而已，不要因此
+   讓整批匯入看起來像失敗。 */
+async function savePosOrders(day){
+  const rows = day ? posOrders.filter(o=>o.date===day) : posOrders;
+  if(!rows.length) return 0;
+  try{
+    const r=await callRpc("erp_pos_save_orders",{p_orders:rows});
+    return (r&&r.saved)||0;
+  }catch(e){ console.warn("訂單層存檔失敗",e); return 0; }
 }
 
 /* 匯入失敗要留在畫面上。
@@ -2235,8 +2272,14 @@ async function loadAnalytics(force){
   const want=anMonths;
   if(!analytics)$("#an-insights").innerHTML=`<div class="empty"><div class="t">分析中…</div></div>`;
   try{
-    const r=await callRpc("erp_analytics",{p_months:want});
+    const [r,ord]=await Promise.all([
+      callRpc("erp_analytics",{p_months:want}),
+      // 訂單層是後來才有的，舊帳號可能還沒部署，失敗就當沒有
+      callRpc("erp_order_analytics",{p_months:want}).catch(e=>{
+        console.warn("訂單分析讀取失敗",e); return null; })
+    ]);
     if(want!==anMonths)return;          // 期間又被切走了，這份結果已經過時
+    r.orderStats=ord;
     analytics=r; anAt=Date.now();
     anCache[want]={data:r,at:anAt};
     renderAnalysis();
@@ -2376,6 +2419,78 @@ function buildInsights(a){
   return R;
 }
 
+/* 時段和單筆訂單。
+   這兩塊要訂單層資料（付款時間、整單金額），是後來才開始存的。
+   舊的匯入沒有 —— 與其畫一張空圖，不如直接說要重匯哪幾天。 */
+function renderOrderStats(os){
+  const need=`<div class="empty"><div class="ic">—</div>
+    <div class="t">還沒有訂單層資料</div>
+    <div style="font-size:11px;margin-top:6px;line-height:1.7">時段和單筆金額要「付款時間」和「整單金額」，<br>
+    以前的匯入沒存。到 報表 → 匯入微碧報表，<br>把同一份訂單列表 CSV 再匯一次就會補上。<br>
+    重複匯不會重複扣庫存。</div></div>`;
+  if(!os || !num(os.with_time)){
+    $("#an-hours").innerHTML=""; $("#an-hour-note").innerHTML=need;
+    $("#an-basket").innerHTML=need; return;
+  }
+
+  const hrs=(os.hours||[]);
+  const mx=Math.max(1,...hrs.map(h=>num(h.per_day)));
+  const peak=hrs.reduce((x,y)=>num(y.per_day)>num(x.per_day)?y:x,hrs[0]);
+  $("#an-hours").innerHTML=hrs.map(h=>{
+    const v=num(h.per_day), top=h.h===peak.h;
+    return `<div class="col"><div class="vv">${v>=1?Math.round(v):""}</div>
+      <div class="bar${top?"":" dim"}" style="height:${Math.max(2,v/mx*66)}%"></div>
+      <div class="lb">${h.h}</div></div>`;
+  }).join("");
+  const half=hrs.slice().sort((x,y)=>num(y.per_day)-num(x.per_day));
+  const tot=hrs.reduce((t,h)=>t+num(h.orders),0)||1;
+  let acc=0, needN=0;
+  for(const h of half){ acc+=num(h.orders); needN++; if(acc/tot>=0.5) break; }
+  $("#an-hour-note").innerHTML=`<div class="exp-cat-row" style="border-bottom:none">
+    <div style="font-size:12.5px;line-height:1.75">
+      最忙的是 <b>${peak.h}:00–${peak.h+1}:00</b>，平均 ${num(peak.per_day)} 單、${money(peak.amt_per_day)}。
+      一半的訂單集中在 <b>${needN} 個小時</b>內（${half.slice(0,needN).map(h=>h.h+"點").join("、")}）。
+      <div style="color:var(--grey);font-size:11px;margin-top:6px">
+        備茶和排班照這個抓。橫軸是幾點，數字是那個小時平均幾單（${num(os.days)} 個營業日）。</div>
+    </div></div>`;
+
+  const lift=os.mds_lift||{};
+  const bandMax=Math.max(1,...(os.bands||[]).map(b=>num(b.orders)));
+  const sizeMax=Math.max(1,...(os.sizes||[]).map(b=>num(b.orders)));
+  const bar=(label,n,max,extra)=>{
+    const pct=Math.round(n/max*100);
+    return `<div class="exp-cat-row"><div class="top"><span class="nm">${label}</span>
+      <span class="amt">${Math.round(n).toLocaleString()} 單${extra?` <span class="pct">${extra}</span>`:""}</span></div>
+      <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div></div>`;
+  };
+  const hd=t=>`<div class="exp-cat-row" style="background:var(--news)"><span class="nm" style="font-size:10px;letter-spacing:2.5px;color:var(--grey)">${t}</span></div>`;
+  const totalOrders=num(os.orders)||1;
+  let html=`<div class="exp-cat-row" style="background:var(--news)">
+    <div style="display:flex;gap:14px;font-size:12px">
+      <div><div style="color:var(--grey);font-size:10px;letter-spacing:1px">平均一單</div><b style="font-size:15px">${money(os.avg_total)}</b></div>
+      <div><div style="color:var(--grey);font-size:10px;letter-spacing:1px">平均幾件</div><b style="font-size:15px">${num(os.avg_items)}</b></div>
+      <div><div style="color:var(--grey);font-size:10px;letter-spacing:1px">訂單數</div><b style="font-size:15px">${totalOrders.toLocaleString()}</b></div>
+    </div></div>`;
+  /* 有買周邊的單值多少 —— 這是全頁最能說服人的一個數字。
+     要在結帳時多開一次口，得先知道那一句話值幾塊錢。 */
+  if(num(lift.with_n) && num(lift.without_n)){
+    const diff=num(lift.with_avg)-num(lift.without_avg);
+    const share=Math.round(num(lift.with_n)/(num(lift.with_n)+num(lift.without_n))*100);
+    html+=`<div class="exp-cat-row"><div style="font-size:12.5px;line-height:1.75">
+      有買周邊的單平均 <b>${money(lift.with_avg)}</b>，沒買的 <b>${money(lift.without_avg)}</b>
+      —— 差 <b style="color:var(--ok)">${money(diff)}</b>。
+      目前只有 <b>${share}%</b> 的單有買周邊。
+      <div style="color:var(--grey);font-size:11px;margin-top:6px">
+        每多讓 1% 的單買到周邊，一期約多 ${money(diff*totalOrders*0.01)}。</div>
+    </div></div>`;
+  }
+  html+=hd("單筆金額")+(os.bands||[]).map(b=>
+    bar(b.band,num(b.orders),bandMax,Math.round(num(b.orders)/totalOrders*100)+"%")).join("");
+  html+=hd("一單幾件")+(os.sizes||[]).map(b=>
+    bar(b.n>=6?"6 件以上":`${b.n} 件`,num(b.orders),sizeMax,Math.round(num(b.orders)/totalOrders*100)+"%")).join("");
+  $("#an-basket").innerHTML=html;
+}
+
 $("#an-seg").addEventListener("click",e=>{if(e.target.dataset.v)setAnMonths(+e.target.dataset.v);});
 
 function renderAnalysis(){
@@ -2448,6 +2563,8 @@ function renderAnalysis(){
   $("#an-opts").innerHTML=(sw.length||ic.length)
     ? hd("甜度")+bars(sw)+hd("冰塊")+bars(ic)
     : `<div class="empty"><div class="ic">—</div><div class="t">沒有選項資料</div></div>`;
+
+  renderOrderStats(a.orderStats);
 
   const fade=(a.fading||[]);
   $("#an-fading").innerHTML=fade.length
