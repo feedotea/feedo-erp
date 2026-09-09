@@ -148,6 +148,30 @@ body{
 .pl-row.profit .v.neg{color:var(--alert)}
 .bar-track{height:7px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:5px}
 .bar-fill{height:100%;background:var(--blue)}
+/* 營運分析 */
+.ins{background:var(--paper);border:1px solid var(--line);border-left:3px solid var(--grey);border-radius:2px;padding:12px 14px;margin-bottom:8px}
+.ins.win{border-left-color:var(--ok)}
+.ins.warn{border-left-color:var(--warn)}
+.ins.risk{border-left-color:var(--alert)}
+.ins .t{font-size:14px;font-weight:700;margin-bottom:5px;line-height:1.45}
+.ins .b{font-size:12.5px;line-height:1.7;color:#3A3A3A}
+.ins .im{display:inline-block;margin-top:8px;font-size:11px;letter-spacing:.5px;padding:3px 8px;border:1px solid var(--line);border-radius:2px;background:var(--news);color:var(--blue);font-weight:700}
+.ins .do{font-size:12.5px;line-height:1.7;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
+.ins .do b{font-weight:700;letter-spacing:.5px}
+.trend{display:flex;align-items:flex-end;gap:6px;padding:14px 14px 10px;height:132px}
+.trend .col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;height:100%}
+.trend .bar{width:100%;background:var(--blue);border-radius:1px 1px 0 0;min-height:2px}
+.trend .bar.dim{background:var(--silver)}
+.trend .vv,.trend .lb{font-size:10px;color:var(--grey);white-space:nowrap;letter-spacing:.3px}
+.mini-tbl{width:100%;border-collapse:collapse;font-size:12px}
+.mini-tbl th{text-align:right;font-weight:600;color:var(--grey);font-size:10px;letter-spacing:.5px;padding:9px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+.mini-tbl th:first-child,.mini-tbl td:first-child{text-align:left}
+.mini-tbl td{padding:9px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+.mini-tbl tr:last-child td{border-bottom:none}
+.mini-tbl td.nm{white-space:normal;line-height:1.35}
+.mini-tbl td.hi{font-weight:700}
+.mini-tbl .sub{font-size:10px;color:var(--grey);font-weight:400;margin-top:2px}
+.mini-tbl tr.best td{background:#F6F4EE}
 .exp-cat-row{padding:11px 14px;border-bottom:1px solid var(--line);background:var(--paper)}
 .exp-cat-row:last-child{border-bottom:none}
 .exp-cat-row .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
@@ -483,6 +507,24 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   <div class="card" id="exp-breakdown"></div>
   <div class="sec-eyebrow">當月所有開銷</div>
   <div class="card" id="exp-list"></div>
+  <div class="scroll-hint"></div>
+</div>
+
+<!-- 營運分析 -->
+<div class="screen hidden" id="scr-analysis">
+  <div class="sec-eyebrow">經營建議 · <span id="an-range">—</span></div>
+  <div id="an-insights"></div>
+  <div class="sec-eyebrow">月趨勢 · 日均營收</div>
+  <div class="card"><div class="trend" id="an-trend"></div></div>
+  <div class="card" style="overflow-x:auto"><table class="mini-tbl" id="an-mtbl"></table></div>
+  <div class="sec-eyebrow">星期表現</div>
+  <div class="card" style="overflow-x:auto"><table class="mini-tbl" id="an-dow"></table></div>
+  <div class="sec-eyebrow">賣什麼賺錢</div>
+  <div class="card" style="overflow-x:auto"><table class="mini-tbl" id="an-items"></table></div>
+  <div class="sec-eyebrow">客人怎麼點</div>
+  <div class="card" id="an-opts"></div>
+  <div class="sec-eyebrow">退燒品項</div>
+  <div class="card" id="an-fading"></div>
   <div class="scroll-hint"></div>
 </div>
 
@@ -2033,6 +2075,242 @@ async function deleteRevenue(date){
   toast("已刪除該筆營收"+(sent?"":"　⚠ 待同步"));
 }
 
+/* ---------------------------------------------------------------
+   營運分析
+   數字一次從 erp_analytics 拿回來，建議在這裡用規則算出來。
+   規則放前端有兩個理由：店長看得到結論是怎麼推的（看不懂的建議
+   沒人會照做），資料也不用送出店外。每條建議一定要有「數字 +
+   該做什麼」——只講現象不講動作，看完還是不知道要幹嘛。
+   --------------------------------------------------------------- */
+let analytics=null, anAt=0, anLoading=false;
+const WDAY=["日","一","二","三","四","五","六"];
+const num=x=>Number(x)||0;
+const eh=s=>String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+// 建議文字是用樣板字串跨行寫的，換行縮排在 HTML 裡會變成多餘空白
+const sp=t=>String(t).replace(/\s+/g," ").trim();
+
+async function loadAnalytics(force){
+  if(!dataReady||!isManager())return;
+  if(analytics && !force && Date.now()-anAt<60000) return renderAnalysis();
+  if(anLoading)return;
+  anLoading=true;
+  if(!analytics)$("#an-insights").innerHTML=`<div class="empty"><div class="t">分析中…</div></div>`;
+  try{
+    analytics=await callRpc("erp_analytics",{p_months:6});
+    anAt=Date.now();
+    renderAnalysis();
+  }catch(e){
+    $("#an-insights").innerHTML=`<div class="empty"><div class="ic">⚠</div><div class="t">${eh(e.message||"讀取失敗")}</div></div>`;
+  }finally{ anLoading=false; }
+}
+
+function buildInsights(a){
+  const R=[]; const add=(tone,t,b,impact,todo)=>R.push({tone,t,b,impact:impact||"",todo:todo||""});
+  const months=(a.months||[]);
+  const full=months.filter(m=>m.days>=10);        // 只做幾天的月份不能拿來比
+  const dow=(a.dow||[]).filter(d=>d.days>=3);
+  const mdow=dow.filter(d=>d.cat_days>=3 && d.mds_pct!=null);
+  const cupsMax=Math.max(0,...dow.map(d=>num(d.avg_cups)));
+
+  /* 1. 周邊在哪一天漏掉。
+     同樣的客流、同樣的工時，只差有沒有開口 —— 店裡最便宜的一塊成長。 */
+  if(mdow.length>=4){
+    const best=mdow.reduce((x,y)=>num(y.avg_mds)>num(x.avg_mds)?y:x);
+    const worst=mdow.reduce((x,y)=>num(y.avg_mds)<num(x.avg_mds)?y:x);
+    const avg=mdow.reduce((s,d)=>s+num(d.avg_mds),0)/mdow.length;
+    if(num(best.avg_mds)>=num(worst.avg_mds)*1.5 && num(worst.avg_cups)>0){
+      const up=Math.round((avg-num(worst.avg_mds))*52);
+      const busy=num(worst.avg_cups)>=cupsMax*0.95;
+      add("warn",`星期${WDAY[worst.dow]}的客人有進來，但沒買到周邊`,
+        `星期${WDAY[worst.dow]}日均 ${num(worst.avg_cups)} 杯${busy?"，是一週客流最高的一天":"，客流不算差"}，
+         周邊卻只有 ${money(worst.avg_mds)}／天、佔營收 ${worst.mds_pct}%。
+         星期${WDAY[best.dow]}是 ${money(best.avg_mds)}／天、${best.mds_pct}%。`,
+        up>0?`拉到全週平均 ≈ ＋${money(up)}／年`:"",
+        `星期${WDAY[worst.dow]}把杯套擺到出杯口，結帳時開口問一次。
+         這天不必多招客人，只要多問。`);
+    }
+  }
+
+  /* 2. 這個月是靠人變多還是靠買更多。兩者的對策完全不同，
+     只看總營收看不出來，一定要拆成來客數 × 客單價。 */
+  if(full.length>=2){
+    const cur=full[full.length-1], prev=full[full.length-2];
+    const cd=num(cur.revenue)/cur.days, pd=num(prev.revenue)/prev.days;
+    const pct=pd?Math.round((cd/pd-1)*100):0;
+    const cOrd=num(cur.orders)/cur.days, pOrd=num(prev.orders)/prev.days;
+    const cAov=num(cur.orders)?num(cur.revenue)/num(cur.orders):0;
+    const pAov=num(prev.orders)?num(prev.revenue)/num(prev.orders):0;
+    const oP=pOrd?Math.round((cOrd/pOrd-1)*100):0;
+    const aP=pAov?Math.round((cAov/pAov-1)*100):0;
+    const sg=n=>(n>=0?"＋":"")+n+"%";
+    if(Math.abs(pct)>=5){
+      add(pct>0?"win":"risk",`${cur.m} 日均營收${pct>0?"成長":"下滑"} ${Math.abs(pct)}%`,
+        `${prev.m} ${money(pd)}／天 → ${cur.m} ${money(cd)}／天。
+         拆開看：來客 ${sg(oP)}（${Math.round(pOrd)}→${Math.round(cOrd)} 單／天），
+         客單價 ${sg(aP)}（${money(pAov)}→${money(cAov)}）。`,
+        "",
+        (oP<0&&aP>0) ? "客人變少、但每個買更多。營收撐住了，可是來客在流失 —— 這是先漂亮後難看的組合，要先找人為什麼不來。"
+        : (oP>0&&aP<0) ? "客人變多、但每個買得少。人潮不缺，缺的是加購 —— 從周邊和加料下手最快。"
+        : (pct>0 ? "來客和客單價一起漲，現在的做法是對的，維持。"
+                 : "兩邊一起掉。先看來客數，那是根 —— 客單價通常是跟著人流走的。"));
+    }
+  }
+
+  /* 3. 周邊：算得出成本的部分毛利多少、還有多少算不出來。
+     沒對應完成本的話，上面所有毛利都是高估的，要講清楚。 */
+  const mt=months.reduce((s,m)=>({amt:s.amt+num(m.mds_amount), qty:s.qty+num(m.mds_qty),
+    cost:s.cost+num(m.mds_cost), un:s.un+num(m.mds_unmapped), cat:s.cat+num(m.cat_amount)}),
+    {amt:0,qty:0,cost:0,un:0,cat:0});
+  if(mt.amt>0 && mt.cat>0){
+    const pct=Math.round(mt.amt/mt.cat*100), gp=mt.amt-mt.cost;
+    if(mt.un>0){
+      add("risk",`還有 ${Math.round(mt.un)} 件周邊查不到成本`,
+        `周邊營收 ${money(mt.amt)}、佔全店 ${pct}%，是最大的一塊。
+         但其中 ${Math.round(mt.un)} 件沒有對應到品項，成本算不進去，
+         毛利顯示 ${money(gp)}，實際比這個低。`,"",
+        "報表 → 匯入微碧報表 → POS 品項對應，按「＋建品項」把剩下的周邊建好、填成本。");
+    }else{
+      add("win",`周邊佔營收 ${pct}%，毛利率 ${Math.round(gp/mt.amt*100)}%`,
+        `${Math.round(mt.qty).toLocaleString()} 件、${money(mt.amt)}，
+         成本 ${money(mt.cost)}，毛利 ${money(gp)}。`,"",
+        "周邊不佔出杯工時，靠陳列和開口就能推。固定出新款、固定擺在看得到的位置。");
+    }
+  }
+
+  /* 4. 一週的忙閒差。排班和備茶量該照這個走，不是照直覺。 */
+  if(dow.length>=5){
+    const hi=dow.reduce((x,y)=>num(y.avg_revenue)>num(x.avg_revenue)?y:x);
+    const lo=dow.reduce((x,y)=>num(y.avg_revenue)<num(x.avg_revenue)?y:x);
+    if(num(lo.avg_revenue)>0 && num(hi.avg_revenue)>=num(lo.avg_revenue)*1.3){
+      add("info",`一週最忙和最閒差 ${(num(hi.avg_revenue)/num(lo.avg_revenue)).toFixed(1)} 倍`,
+        `星期${WDAY[hi.dow]} ${money(hi.avg_revenue)}／天、${num(hi.avg_cups)} 杯；
+         星期${WDAY[lo.dow]} ${money(lo.avg_revenue)}／天、${num(lo.avg_cups)} 杯。`,"",
+        `人力和備茶照這個排：星期${WDAY[hi.dow]}排滿、茶多煮；
+         星期${WDAY[lo.dow]}可以少一個人、少煮幾桶，省下來的是純的。`);
+    }
+  }
+
+  /* 5. 集中度：少數品項撐營收 = 缺料風險，安全庫存要分等級。 */
+  const its=(a.items||[]);
+  if(its.length>=8){
+    const tot=(a.cat_total||[]).reduce((s,c)=>s+num(c.amount),0)
+              || its.reduce((s,i)=>s+num(i.amount),0);
+    const pct=Math.round(its.slice(0,5).reduce((s,i)=>s+num(i.amount),0)/tot*100);
+    add("info",`前 5 名品項撐起 ${pct}% 的營收`,
+      its.slice(0,5).map((i,n)=>`${n+1}. ${eh(i.name)} ${money(i.amount)}`).join("　"),"",
+      pct>=55 ? "太集中了。這 5 樣任何一樣缺料或做壞，當天就有感 —— 它們的安全庫存要單獨拉高，不能跟其他品項用同一套標準。"
+              : "分佈算平均，沒有壓在單一品項上的風險。");
+  }
+
+  /* 6. 退燒品項。菜單每留一項就多一種料要備、要顧新鮮度。 */
+  const fade=(a.fading||[]);
+  if(fade.length){
+    add("warn",`${fade.length} 個品項這 30 天幾乎沒人點`,
+      fade.slice(0,5).map(f=>`${eh(f.name)}（之前 ${Math.round(num(f.q_prev))} 杯 → 近 30 天 ${Math.round(num(f.q30))} 杯）`).join("、"),"",
+      "確認不是季節性的話就下架。每留一項就多一種料要備、要顧新鮮度，也多一格佔菜單版面。");
+  }
+
+  /* 7. 甜度冰塊：預設值設對，出杯少按兩下；備料也照這個比例抓。 */
+  const sw=(a.options||[]).filter(o=>o.kind==="sweet");
+  const ic=(a.options||[]).filter(o=>o.kind==="ice");
+  if(sw.length&&ic.length){
+    const swT=sw.reduce((s,o)=>s+num(o.qty),0), icT=ic.reduce((s,o)=>s+num(o.qty),0);
+    add("info","客人最常點的甜度和冰塊",
+      `甜度 ${eh(sw[0].name)} ${Math.round(num(sw[0].qty)/swT*100)}%（${Math.round(num(sw[0].qty)).toLocaleString()} 杯）；
+       冰塊 ${eh(ic[0].name)} ${Math.round(num(ic[0].qty)/icT*100)}%（${Math.round(num(ic[0].qty)).toLocaleString()} 杯）。`,"",
+      `POS 預設值設成 ${eh(sw[0].name)}／${eh(ic[0].name)}，點單少按兩下；糖量備料照這個比例抓。`);
+  }
+
+  /* 8. 資料缺口。這些沒補，上面的毛利就只是「毛利」，不是淨利。 */
+  const gaps=[];
+  if(!expenses.length) gaps.push("開銷一筆都沒記（房租、水電、人事）");
+  if(items.length && items.every(i=>!num(i.bal))) gaps.push("庫存還是 0，沒盤過");
+  if(gaps.length){
+    add("risk","損益還算不完整",
+      gaps.join("；")+"。營收和物料成本是準的，但扣完固定開銷之後真正剩多少，現在算不出來。","",
+      "先做一次盤點，再把每月固定開銷補進去。之後每個月的損益才有意義。");
+  }
+  return R;
+}
+
+function renderAnalysis(){
+  const a=analytics; if(!a)return;
+  $("#an-range").textContent=`${a.from} ～ ${a.to}`;
+
+  const ins=buildInsights(a);
+  $("#an-insights").innerHTML = ins.length
+    ? ins.map(x=>`<div class="ins ${x.tone}">
+        <div class="t">${x.t}</div><div class="b">${sp(x.b)}</div>
+        ${x.impact?`<div class="im">${x.impact}</div>`:""}
+        ${x.todo?`<div class="do"><b>怎麼做</b>　${sp(x.todo)}</div>`:""}
+      </div>`).join("")
+    : `<div class="empty"><div class="ic">—</div><div class="t">資料還太少，多匯幾天就會有建議</div></div>`;
+
+  // 月趨勢。未滿 10 天的月份畫灰的，避免拿半個月跟整個月比。
+  const ms=(a.months||[]);
+  const mx=Math.max(1,...ms.map(m=>num(m.revenue)/(m.days||1)));
+  $("#an-trend").innerHTML=ms.map(m=>{
+    const v=num(m.revenue)/(m.days||1);
+    return `<div class="col"><div class="vv">${Math.round(v/1000)}k</div>
+      <div class="bar${m.days<10?" dim":""}" style="height:${Math.max(2,v/mx*70)}%"></div>
+      <div class="lb">${m.m.slice(5)}月</div></div>`;
+  }).join("");
+
+  $("#an-mtbl").innerHTML=`<tr><th>月份</th><th>日均營收</th><th>日均杯</th><th>客單價</th><th>周邊</th></tr>`+
+    ms.map(m=>{
+      const d=m.days||1;
+      const aov=num(m.orders)?num(m.revenue)/num(m.orders):0;
+      const mp=num(m.cat_amount)?Math.round(num(m.mds_amount)/num(m.cat_amount)*100):null;
+      return `<tr><td class="hi">${m.m}<div class="sub">${m.days} 天${m.days<10?"・未滿月":""}</div></td>
+        <td class="hi">${money(num(m.revenue)/d)}</td>
+        <td>${Math.round(num(m.cups)/d)}</td><td>${aov?money(aov):"—"}</td>
+        <td>${mp!=null?mp+"%":"—"}</td></tr>`;
+    }).join("");
+
+  const dw=(a.dow||[]);
+  const seen=new Set(dw.map(d=>d.dow));
+  const off=[0,1,2,3,4,5,6].filter(d=>!seen.has(d));
+  const bestRev=Math.max(0,...dw.map(d=>num(d.avg_revenue)));
+  $("#an-dow").innerHTML=`<tr><th>星期</th><th>日均營收</th><th>日均杯</th><th>日均周邊</th><th>周邊</th></tr>`+
+    dw.slice().sort((x,y)=>num(y.avg_revenue)-num(x.avg_revenue)).map(d=>
+      `<tr class="${num(d.avg_revenue)===bestRev?"best":""}">
+        <td class="hi">星期${WDAY[d.dow]}<div class="sub">${d.days} 天</div></td>
+        <td class="hi">${money(d.avg_revenue)}</td><td>${num(d.avg_cups)}</td>
+        <td>${d.cat_days?money(d.avg_mds):"—"}</td>
+        <td>${d.mds_pct!=null?d.mds_pct+"%":"—"}</td></tr>`).join("")
+    + (off.length?`<tr><td colspan="5" style="text-align:left;color:var(--grey)">星期${off.map(d=>WDAY[d]).join("、")}沒有營業紀錄</td></tr>`:"");
+
+  $("#an-items").innerHTML=`<tr><th>品項</th><th>件數</th><th>營收</th><th>毛利</th></tr>`+
+    (a.items||[]).slice(0,12).map(i=>{
+      const gp=i.mapped?num(i.amount)-num(i.cost):null;
+      return `<tr><td class="nm">${eh(i.name)}<div style="font-size:10px;color:var(--grey)">${eh(i.category||"—")}</div></td>
+        <td>${Math.round(num(i.qty)).toLocaleString()}</td><td class="hi">${money(i.amount)}</td>
+        <td>${gp!=null&&num(i.amount)?`${money(gp)} <span style="color:var(--grey);font-size:10px">${Math.round(gp/num(i.amount)*100)}%</span>`:"—"}</td></tr>`;
+    }).join("");
+
+  const sw=(a.options||[]).filter(o=>o.kind==="sweet");
+  const ic=(a.options||[]).filter(o=>o.kind==="ice");
+  const bars=(list)=>{
+    const t=list.reduce((s,o)=>s+num(o.qty),0)||1;
+    return list.map(o=>{
+      const pct=Math.round(num(o.qty)/t*100);
+      return `<div class="exp-cat-row"><div class="top"><span class="nm">${eh(o.name)}</span>
+        <span class="amt">${Math.round(num(o.qty)).toLocaleString()} 杯 <span class="pct">${pct}%</span></span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div></div>`;
+    }).join("");
+  };
+  const hd=t=>`<div class="exp-cat-row" style="background:var(--news)"><span class="nm" style="font-size:10px;letter-spacing:2.5px;color:var(--grey)">${t}</span></div>`;
+  $("#an-opts").innerHTML=(sw.length||ic.length)
+    ? hd("甜度")+bars(sw)+hd("冰塊")+bars(ic)
+    : `<div class="empty"><div class="ic">—</div><div class="t">沒有選項資料</div></div>`;
+
+  const fade=(a.fading||[]);
+  $("#an-fading").innerHTML=fade.length
+    ? fade.map(f=>`<div class="exp-item"><div class="l"><div class="n">${eh(f.name)}</div>
+        <div class="s">更早以前 ${Math.round(num(f.q_prev))} 杯 → 最近 30 天 ${Math.round(num(f.q30))} 杯</div></div></div>`).join("")
+    : `<div class="empty"><div class="ic">✓</div><div class="t">沒有明顯退燒的品項</div></div>`;
+}
+
 /* nav */
 /* 分頁按「多久做一次」分，不是按「是庫存還是帳務」。
    舊的分法把每天要做的事散在兩個模式裡，每月一次的也散在兩邊，
@@ -2040,7 +2318,7 @@ async function deleteRevenue(date){
 const STOCK_TABS=[["brew","🍵","煮茶"],["order","⚑","叫貨"],["log","⇅","進出"],["inv","▦","庫存"]];
 /* 帳務只留真正是「帳」的三格。
    盤點是庫存作業，搬回庫存頁；每日營收清單併進報表頁。 */
-const MONEY_TABS=[["report","▤","報表"],["expense","✎","開銷"],["recon","☰","月結"]];
+const MONEY_TABS=[["report","▤","報表"],["analysis","◈","分析"],["expense","✎","開銷"],["recon","☰","月結"]];
 let mode="stock";
 function setMode(m){
   if(m==="money" && !isManager()){toast("帳務功能限店長使用");return;}
@@ -2058,7 +2336,7 @@ function buildTabs(){
 let curScreen="brew";
 function nav(scr){
   curScreen=scr;
-  ["brew","log","order","inv","expense","report","recon","stocktake"].forEach(s=>$("#scr-"+s).classList.toggle("hidden",s!==scr));
+  ["brew","log","order","inv","expense","report","analysis","recon","stocktake"].forEach(s=>$("#scr-"+s).classList.toggle("hidden",s!==scr));
   [...document.querySelectorAll(".tab")].forEach(t=>t.classList.toggle("on",t.dataset.scr===scr));
   $("#submit-brew").classList.toggle("hidden",scr!=="brew");
   if(scr==="brew") updateBrewPending();
@@ -2066,6 +2344,7 @@ function nav(scr){
   $("#submit-expense").classList.toggle("hidden",scr!=="expense");
   $("#submit-stocktake").classList.toggle("hidden",scr!=="stocktake");
   if(scr==="report"){renderReport();renderRevenue();loadMonthReport();}
+  if(scr==="analysis")loadAnalytics();
   if(scr==="expense")renderPay();
   if(scr==="recon")renderRecon();
   if(scr==="stocktake")renderStocktake();

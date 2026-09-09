@@ -13,6 +13,7 @@
 | 3 | `03_security.sql` | RLS deny-all，只開放 RPC 給登入者 |
 | 4 | `04_seed.sql` | 匯入 16 個品項主檔 |
 | 5 | `05_pos_import.sql` | 微碧 POS 報表匯入（表 + RPC + 權限） |
+| 6 | `06_analytics.sql` | 營運分析（`erp_analytics`，只讀，店長限定） |
 
 順序不能顛倒（03 要先有 01、02 建立的物件才收得掉權限）。
 
