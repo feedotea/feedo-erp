@@ -2437,7 +2437,7 @@ function buildInsights(a){
     const gap=cw-lp.week, pct=Math.round(gap/lp.week*100);
     if(pct>=25){
       add("warn",`人力比「做得完」多了 ${pct}%`,
-        `依你的實測產能（一人一小時 ${lp.cph} 杯）算，一週需要 ${Math.round(lp.week)} 人時，
+        `依你的實測產能（一人一小時 ${Math.round(lp.solo)} 杯、三人 ${Math.round(lp.solo*crewEff(3))} 杯）算，一週需要 ${Math.round(lp.week)} 人時，
          目前排 ${Math.round(cw)} 人時，多 ${Math.round(gap)} 人時、約 ${money(gap*num(labor.wage)*4.33)}／月。
          最忙的星期${WDAY[lp.rows[0].dow]}尖峰也只要 ${lp.rows[0].peak} 個人。`,
         `每月 ${money(gap*num(labor.wage)*4.33)}`,
@@ -2477,24 +2477,38 @@ function buildInsights(a){
    所以下面一律講「下限」，不講「你應該排幾人」。
    --------------------------------------------------------------- */
 let labor={peak_staff:3, max_staff:3, min_staff:1, prep_hours:2, wage:200, current_week_hours:0};
-/* 一人一小時幾杯 = 你單小時最高做過幾杯 ÷ 那個小時幾個人。
-   不叫店長憑印象填一個數字 —— 憑印象填出來的班表沒人敢照排。
-   用「每天最高值的中位數」而不是單一最高：最高那一次可能是特例，
-   中位數才代表得了平常的尖峰。 */
-function cupsPerHour(os){
-  // 分子分母要配對：最忙的那一小時，配當時的最高人力。
-  // 拿「平常的尖峰」去除「尖峰人數」會低估 —— 平常那天本來就沒排滿。
+/* 加人不是加倍。
+   吧台就那麼大、封膜機一台、收銀一台、搖杯的位置就那幾個 ——
+   第二個人大約多 70%，第三個人只再多 40%。用「總杯數 ÷ 人數」得到
+   的每人杯數，會隨著人變多而下降，拿 3 人時測到的數字去推 1 人的
+   時段，離峰就會排太多人。
+
+   這組比例是估的，不是量出來的。真要量得知道每個小時各排幾個人，
+   POS 沒有那個資料。寫在這裡讓人看得到，之後有實測再改。 */
+const CREW_EFF=[0, 1, 1.7, 2.1, 2.4, 2.6];
+function crewEff(n){ return CREW_EFF[Math.min(Math.max(1,n), CREW_EFF.length-1)]; }
+
+/* 一個人一小時幾杯。
+   用最忙那一小時的實績，除掉「當時那些人合起來等於幾個人」——
+   不是除人頭。分子分母要配對：最忙的小時配當時的最高人力。 */
+function soloPerHour(os){
   const base=num(os&&os.peak&&os.peak.cups);
-  const n=Math.max(1,num(labor.peak_staff));
   if(!base) return null;
-  return Math.max(1, Math.round(base/n));
+  return base / crewEff(Math.max(1,num(labor.peak_staff)));   // 保留小數，四捨五入只用在顯示
+}
+/* 這個小時要幾個人：從最少開始加，加到做得完為止。
+   加到上限還是做不完就標 tight —— 那些小時是靠排隊消化的。 */
+function staffFor(cups, solo, cap, minStaff){
+  const lo=Math.max(1, minStaff);
+  for(let n=lo; n<=cap; n++) if(solo*crewEff(n) >= cups) return {n, tight:false};
+  return {n:cap, tight:cups > solo*crewEff(cap)};
 }
 
 function laborPlan(os){
   const hd=(os&&os.hours_dow)||[];
   if(!hd.length) return null;
-  const cph=cupsPerHour(os);
-  if(!cph) return null;
+  const solo=soloPerHour(os);
+  if(!solo) return null;
   const cap=Math.max(1,num(labor.max_staff));
   const byDow={};
   hd.forEach(x=>{
@@ -2506,19 +2520,17 @@ function laborPlan(os){
     g.hours.sort((a,b)=>a.h-b.h);
     g.plan=g.hours.map(x=>{
       const c=num(x.cups_per_day);
-      const want=Math.max(num(labor.min_staff), Math.ceil(c/cph));
-      // 排不出第四個人就是排不出來。超過上限的時段標出來，不要假裝排得出
-      const n=Math.min(cap, want);
-      if(want>cap) g.over=(g.over||0)+1;
+      const {n,tight}=staffFor(c, solo, cap, num(labor.min_staff));
+      if(tight) g.over=(g.over||0)+1;
       g.cups+=c; g.manHours+=n; g.peak=Math.max(g.peak,n);
-      return {h:x.h, cups:c, n, tight:want>cap};
+      return {h:x.h, cups:c, n, tight};
     });
     g.prep=num(labor.prep_hours)*Math.max(1,num(labor.min_staff));
     g.total=g.manHours+g.prep;
     return g;
   }).sort((a,b)=>b.total-a.total);
   const week=rows.reduce((s,r)=>s+r.total,0);
-  return {rows, week, cph, cap};
+  return {rows, week, solo, cap};
 }
 
 function renderLabor(os){
@@ -2531,7 +2543,7 @@ function renderLabor(os){
       onchange="saveLabor()"></div>`;
   /* 產能是算出來的不是填的。這裡只問一句「那個小時幾個人」，
      系統用實測杯數除，得到「一人一小時幾杯」。 */
-  const pk=os&&os.peak, typ=num(os&&os.peak_typ), cph=cupsPerHour(os);
+  const pk=os&&os.peak, typ=num(os&&os.peak_typ), solo=soloPerHour(os);
   const head = pk
     ? `<div class="exp-cat-row" style="background:var(--news)">
          <div style="font-size:12.5px;line-height:1.75">
@@ -2545,10 +2557,16 @@ function renderLabor(os){
            還沒有時段資料，產能算不出來。把訂單列表 CSV 匯一次就有。</div></div>`;
   setBox.innerHTML = head +
     fld("peak_staff","尖峰時吧台幾個人","算產能用的分母")+
-    (cph?`<div class="exp-cat-row" style="border-bottom:1px solid var(--line)">
-       <div style="font-size:12.5px">實測產能　<b style="font-size:16px">${cph} 杯</b>／人／小時
-       <div style="color:var(--grey);font-size:11px;margin-top:4px">
-         ${num(pk&&pk.cups)} 杯 ÷ ${num(labor.peak_staff)} 人。含收銀、封膜、洗杯，是實際節奏不是理論值。</div></div></div>`:"")+
+    (solo?`<div class="exp-cat-row" style="border-bottom:1px solid var(--line)">
+       <div style="font-size:12.5px">實測產能
+         <div style="margin:6px 0 4px;font-size:13px">
+           ${[1,2,3,4].filter(n=>n<=Math.max(2,num(labor.max_staff))).map(n=>
+             `<span style="white-space:nowrap">${n} 人 <b style="font-size:15px">${Math.round(solo*crewEff(n))}</b> 杯</span>`).join("　／　")}
+         </div>
+       <div style="color:var(--grey);font-size:11px;margin-top:4px;line-height:1.7">
+         從 ${num(pk&&pk.cups)} 杯／${num(labor.peak_staff)} 人回推。
+         加人不是加倍 —— 吧台就那麼大，第二個人約多 70%，第三個只再多 40%。
+         這組比例是估的，之後有實測會修正。</div></div></div>`:"")+
     fld("max_staff","最多排得出幾人","再忙也只有這麼多人")+
     fld("min_staff","營業中最少留幾人","再閒也不能只剩零個人顧店")+
     fld("prep_hours","每天備料收攤幾小時","煮茶、備料、打烊清洗")+
@@ -2616,8 +2634,9 @@ function renderLabor(os){
         標 <b style="color:var(--warn)">*</b> 的就是。</div></div></div>`;
   }
   html+=`<div class="exp-cat-row"><div style="font-size:11px;color:var(--grey);line-height:1.7">
-    算法：那個小時的日均杯數 ÷ ${plan.cph} 杯（你的實測產能），無條件進位，
-    再夾在 ${num(labor.min_staff)}～${plan.cap} 人之間。
+    算法：從 ${num(labor.min_staff)} 人開始加，加到做得完那個小時的日均杯數為止，最多 ${plan.cap} 人。
+    一個人一小時 ${Math.round(plan.solo)} 杯，兩個人 ${Math.round(plan.solo*crewEff(2))} 杯，
+    三個人 ${Math.round(plan.solo*crewEff(3))} 杯。
     只算出杯，不含備料收攤（另外加 ${num(labor.prep_hours)} 小時／天）。</div></div>`;
   box.innerHTML=html;
 }
