@@ -357,12 +357,12 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   <div class="modal-sheet">
     <div class="modal-head"><span class="serif">匯入微碧報表</span><button onclick="closeModal('pos')">✕</button></div>
     <div class="modal-note">
-      iPad APP 匯出後會寄三個 CSV，<b>選「訂單列表」那一個</b>。<br>
-      營運總表和交易列表沒有品項明細，用不了。
+      iPad APP 匯出後會寄三個 CSV。<b>「訂單列表」必選</b>，
+      連「營運總表」一起選的話還能拿到分類和單品營收（可多選）。
     </div>
     <div class="field">
       <label>訂單列表 CSV</label>
-      <input class="txt-input" type="file" id="pos-file" accept=".csv,text/csv" onchange="posPickFile(this)">
+      <input class="txt-input" type="file" id="pos-file" accept=".csv,text/csv" multiple onchange="posPickFile(this)">
     </div>
     <div id="pos-result"></div>
     <button class="btn-primary" id="pos-import-btn" style="display:none" onclick="submitPosImport()">確認匯入</button>
@@ -453,6 +453,8 @@ select.txt-input{appearance:none;-webkit-appearance:none}
     <div class="stat"><div class="v serif" id="ops-eco">—</div><div class="k">自帶環保杯</div></div>
     <div class="stat"><div class="v serif" id="ops-others">—</div><div class="k">周邊/袋子</div></div>
   </div>
+  <div class="sec-eyebrow">營收組成</div>
+  <div class="card" id="rev-mix" style="margin-bottom:14px"></div>
   <div class="sec-eyebrow">熱門品項</div>
   <div class="card" id="top-items" style="margin-bottom:14px"></div>
   <div class="sec-eyebrow">每日營收</div>
@@ -1341,6 +1343,21 @@ function renderReport(){
     ["#ops-cups","#ops-orders","#ops-aov","#ops-percup","#ops-eco","#ops-others"]
       .forEach(id=>setOps(id,"—"));
   }
+  // 營收組成（微碧自己分的類別，飲料和周邊才拆得開）
+  const mx=$("#rev-mix");
+  if(mx){
+    const mix=(haveCogs && monthReport.by_category)||[];
+    const tot=mix.reduce((s,c)=>s+Number(c.amount||0),0)||1;
+    mx.innerHTML = mix.length
+      ? mix.map(c=>{
+          const a=Number(c.amount)||0, pct=Math.round(a/tot*100);
+          return `<div class="exp-cat-row"><div class="top"><span class="nm">${c.category}</span>
+            <span class="amt">${money(a)} <span class="pct">${pct}%</span></span></div>
+            <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div></div>`;
+        }).join("")
+      : `<div class="empty"><div class="ic">—</div><div class="t">需要營運總表才有分類</div></div>`;
+  }
+
   const tb=$("#top-items");
   if(tb){
     const top=(haveCogs && monthReport.top)||[];
@@ -1398,7 +1415,7 @@ function exportCSV(){
      交易列表 只有付款金額，沒有品項
    已用 2026/09/07 的真實檔驗過：69 筆訂單、$6,663、26 個品項的數量
    全部對得上微碧自己的營運總表。 */
-let posDays=[], posItems=[], posFileName="", posFileHash="";
+let posDays=[], posItems=[], posCats=null, posFileName="", posFileHash="";
 
 function parseCSV(text){
   if(text.charCodeAt(0)===0xFEFF) text=text.slice(1);
@@ -1474,6 +1491,49 @@ function parseOrderItems(cell){
   return out;
 }
 
+/* 營運總表的「訂購品項分析」是轉置版面：一欄一個品項、一列一種數字。
+
+     【訂購品項分析】
+     "【奶蓋類 (數量:35, 小計:$2,950, 比率:44%)】"
+     ,台東紅烏龍奶蓋,茉莉綠茶奶蓋,...      ← 品名（第一格是空的）
+     數量,7,5,...
+     小計,$560,$400,...
+
+   微碧自己就把類別分好了（奶蓋類／純茶類／鮮奶茶類／袋子／周邊…），
+   所以不用我猜「哪些算飲料」。小計也只有這裡有 —— 訂單列表只有
+   整張單的總價，拆不出單品營收。
+
+   驗過 2026/09/07 的真實檔：26 個品項 4 類，小計加總 $6,663，
+   跟同一份報表的營業額一模一樣。 */
+function parseCategoryAnalysis(rows){
+  const out = [];
+  let start = -1;
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i][0] && rows[i][0].indexOf("訂購品項分析") >= 0) { start = i; break; }
+  }
+  if (start < 0) return out;
+
+  for (let i = start + 1; i < rows.length; ) {
+    const head = (rows[i] && rows[i][0]) || "";
+    const m = head.match(/^【(.+?)\s*\(數量:/);
+    if (!m) { i++; continue; }
+    const cat   = m[1];
+    const names = (rows[i+1] || []).slice(1);
+    const qtys  = (rows[i+2] || []);
+    const amts  = (rows[i+3] || []);
+    // 版面不如預期就跳過這一段，不要硬解出垃圾
+    if (qtys[0] !== "數量" || amts[0] !== "小計") { i++; continue; }
+    for (let k = 0; k < names.length; k++) {
+      const nm = (names[k] || "").trim();
+      if (!nm) continue;
+      out.push({ category: cat, name: nm,
+                 qty: posNum(qtys[k+1]), amount: posNum(amts[k+1]) });
+    }
+    i += 4;
+  }
+  return out;
+}
+
 function openPosImport(){
   posDays=[];posItems=[];posFileName="";posFileHash="";
   $("#pos-file").value="";
@@ -1482,21 +1542,27 @@ function openPosImport(){
   $("#modal-pos").classList.remove("hidden");
 }
 
-function posPickFile(input){
-  const f=input.files&&input.files[0];
-  if(!f) return;
-  if(/\.(xlsx|xls|numbers)$/i.test(f.name)){
+const readBuf=f=>new Promise(res=>{const fr=new FileReader();fr.onload=e=>res(e.target.result);fr.readAsArrayBuffer(f);});
+const toRows=buf=>parseCSV(new TextDecoder("utf-8").decode(buf)).filter(r=>r.some(c=>c!==""));
+
+async function posPickFile(input){
+  const files=[...(input.files||[])];
+  if(!files.length) return;
+  if(files.some(f=>/\.(xlsx|xls|numbers)$/i.test(f.name))){
     toast("請選 CSV，不是 Excel 檔");return;
   }
-  posFileName=f.name;
-  const fr=new FileReader();
-  fr.onload=async e=>{
-    posFileHash=await sha256Hex(e.target.result);
-    const rows=parseCSV(new TextDecoder("utf-8").decode(e.target.result))
-                 .filter(r=>r.some(c=>c!==""));
-    posBuild(rows);
-  };
-  fr.readAsArrayBuffer(f);
+  // 訂單列表是必要的；營運總表有選就順便拿分類和單品營收
+  const order=files.find(f=>/訂單列表/.test(f.name)) || files[0];
+  const total=files.find(f=>/營運總表/.test(f.name));
+  posCats=null;
+  if(total){
+    const cats=parseCategoryAnalysis(toRows(await readBuf(total)));
+    posCats=cats.length?cats:null;
+  }
+  const buf=await readBuf(order);
+  posFileName=order.name;
+  posFileHash=await sha256Hex(buf);
+  posBuild(toRows(buf));
 }
 
 function posBuild(rows){
@@ -1555,6 +1621,7 @@ function posBuild(rows){
     <div class="pl-row"><span class="k">品項</span><span class="v">${cups} 件 · ${kinds} 種</span></div>
     <div class="pl-row"><span class="k">自帶環保杯</span><span class="v">${eco}</span></div>
     <div class="pl-row"><span class="k">封膜</span><span class="v">${film}</span></div>
+    <div class="pl-row"><span class="k">分類</span><span class="v">${posCats?posCats.length+" 個品項":"沒選營運總表，略過"}</span></div>
   </div>
   <div style="font-size:11px;color:var(--grey);line-height:1.6;margin-bottom:12px">
     對一下微碧「營運總表」的訂單數和營業額，數字一樣就沒問題。
@@ -1570,7 +1637,7 @@ async function submitPosImport(){
   try{
     const r=await callRpc("erp_pos_import",{
       p_id:uuid(), p_file_name:posFileName, p_file_hash:posFileHash,
-      p_days:posDays, p_rows:posItems, p_source:"weiby"});
+      p_days:posDays, p_rows:posItems, p_source:"weiby", p_cats:posCats});
     btn.disabled=false;btn.textContent="確認匯入";
     if(r&&r.ok===false){toast("⚠ "+(r.message||"匯入失敗"));return;}
     closeModal('pos');

@@ -53,14 +53,37 @@ create table if not exists erp_pos_sales (
 create index if not exists erp_pos_sales_date_idx on erp_pos_sales (sales_on);
 create index if not exists erp_pos_sales_name_idx on erp_pos_sales (pos_name);
 
+/* 營運總表的「訂購品項分析」：微碧自己分好的類別、數量、小計。
+   訂單列表只有整張單的總價拆不出單品營收，這裡才有。
+   類別也是微碧給的，不用我猜「哪些算飲料」。
+
+   注意：這段是「整份報表」的加總，不是逐日。報表通常就是一個
+   營業日，所以用 date_to 當代表日；跨兩天的報表會全部算在後面
+   那天。逐品項逐日的數量還是以 erp_pos_sales 為準。 */
+create table if not exists erp_pos_categories (
+  id         uuid primary key default gen_random_uuid(),
+  import_id  uuid not null references erp_pos_imports(id) on delete cascade,
+  sales_on   date not null,
+  category   text not null,
+  pos_name   text not null,
+  qty        numeric(12,2) not null default 0,
+  amount     numeric(14,2) not null default 0
+);
+
+create index if not exists erp_pos_cat_date_idx on erp_pos_categories (sales_on);
+create index if not exists erp_pos_cat_cat_idx  on erp_pos_categories (category);
+
 -- 微碧品項名 → ERP 品項。做配方扣料前必須先對應完。
 create table if not exists erp_pos_item_map (
   pos_name   text primary key,
   item_code  text references erp_items(code) on update cascade,
   ignored    boolean not null default false,
+  category   text,                     -- 從營運總表自動帶入，不用人工分類
   mapped_by  uuid references auth.users(id),
   mapped_at  timestamptz not null default now()
 );
+
+alter table erp_pos_item_map add column if not exists category text;
 
 -- ---------------------------------------------------------------------
 -- 匯入
@@ -70,13 +93,18 @@ create table if not exists erp_pos_item_map (
 --   p_rows : [{"date":"...","order_no":"910167","name":"台東紅烏龍",
 --              "qty":2,"options":"1分甜,3分冰"}]
 -- ---------------------------------------------------------------------
+-- 多了 p_cats，簽章變了 —— create or replace 遇到不同簽章是多載不是取代
+drop function if exists erp_pos_import(uuid, text, text, jsonb, jsonb, text);
+
 create or replace function erp_pos_import(
   p_id        uuid,
   p_file_name text,
   p_file_hash text,
   p_days      jsonb,
   p_rows      jsonb,
-  p_source    text default 'weiby'
+  p_source    text default 'weiby',
+  -- 營運總表的品項分析：[{"category":"奶蓋類","name":"...","qty":7,"amount":560}]
+  p_cats      jsonb default null
 ) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
@@ -152,6 +180,21 @@ begin
   join erp_items i on i.pos_role = u.role and i.active
   where u.q > 0;
 
+  -- 營運總表的品項分析：類別、單品營收
+  if p_cats is not null and jsonb_array_length(p_cats) > 0 then
+    delete from erp_pos_categories where sales_on = dto;
+    insert into erp_pos_categories (import_id, sales_on, category, pos_name, qty, amount)
+    select p_id, dto, c->>'category', c->>'name',
+           coalesce((c->>'qty')::numeric, 0), coalesce((c->>'amount')::numeric, 0)
+    from jsonb_array_elements(p_cats) c;
+
+    -- 分類自動帶進對應表，不用人工點 50 個品項
+    insert into erp_pos_item_map (pos_name, category, mapped_by, mapped_at)
+    select distinct c->>'name', c->>'category', uid, now()
+    from jsonb_array_elements(p_cats) c
+    on conflict (pos_name) do update set category = excluded.category, mapped_at = now();
+  end if;
+
   -- 營收以 POS 為準，直接蓋掉手 key 的值
   for d in select * from jsonb_array_elements(p_days) loop
     insert into erp_revenue (revenue_on, amount, note, updated_by, updated_at)
@@ -205,6 +248,10 @@ end $$;
 -- ---------------------------------------------------------------------
 -- 權限
 -- ---------------------------------------------------------------------
+alter table erp_pos_categories enable row level security;
+alter table erp_pos_categories force row level security;
+revoke all on erp_pos_categories from anon, authenticated;
+
 alter table erp_pos_imports  enable row level security;
 alter table erp_pos_sales    enable row level security;
 alter table erp_pos_item_map enable row level security;
@@ -216,9 +263,9 @@ alter table erp_pos_item_map force row level security;
 revoke all on erp_pos_imports, erp_pos_sales, erp_pos_item_map from anon, authenticated;
 
 revoke all on function erp_pos_config(text)                       from public, anon;
-revoke all on function erp_pos_import(uuid,text,text,jsonb,jsonb,text) from public, anon;
+revoke all on function erp_pos_import(uuid,text,text,jsonb,jsonb,text,jsonb) from public, anon;
 revoke all on function erp_pos_map_item(text,text,boolean)        from public, anon;
 
 grant execute on function erp_pos_config(text)                       to authenticated;
-grant execute on function erp_pos_import(uuid,text,text,jsonb,jsonb,text) to authenticated;
+grant execute on function erp_pos_import(uuid,text,text,jsonb,jsonb,text,jsonb) to authenticated;
 grant execute on function erp_pos_map_item(text,text,boolean)        to authenticated;

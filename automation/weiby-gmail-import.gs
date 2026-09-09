@@ -94,6 +94,7 @@ function run() {
       // 同一封信會夾三個檔。訂單列表拿來匯入，營運總表拿來回頭驗算。
       const atts = msg.getAttachments();
       const summary = readSummary(atts);
+      const cats    = readCategories(atts);
 
       atts.forEach(att => {
         const name = att.getName();
@@ -101,7 +102,7 @@ function run() {
 
         if (!token) token = signIn();
         try {
-          const r = importCsv(token, name, att.getBytes(), att.getDataAsString('UTF-8'), summary);
+          const r = importCsv(token, name, att.getBytes(), att.getDataAsString('UTF-8'), summary, cats);
           Logger.log(name + ' → ' + JSON.stringify(r));
           handled = true;
           if (r && r.ok) done++;
@@ -154,7 +155,17 @@ function readSummary(atts) {
   return null;
 }
 
-function importCsv(token, fileName, bytes, text, summary) {
+/* 從同一封信的營運總表撈出品項分析 */
+function readCategories(atts) {
+  for (let i = 0; i < atts.length; i++) {
+    if (!/營運總表.*\.csv$/i.test(atts[i].getName())) continue;
+    const rows = parseCSV(atts[i].getDataAsString('UTF-8')).filter(r => r.some(c => c !== ''));
+    return parseCategoryAnalysis(rows);
+  }
+  return null;
+}
+
+function importCsv(token, fileName, bytes, text, summary, cats) {
   const parsed = buildPayload(text);
   if (!parsed.days.length) return { ok: false, message: '這個檔沒有完成的訂單' };
 
@@ -182,7 +193,8 @@ function importCsv(token, fileName, bytes, text, summary) {
       p_file_hash: sha256Hex(bytes),
       p_days:      parsed.days,
       p_rows:      parsed.items,
-      p_source:    'weiby'
+      p_source:    'weiby',
+      p_cats:      cats || null
     }),
     muteHttpExceptions: true
   });
@@ -261,6 +273,49 @@ function parseOrderItems(cell) {
 function num(v) {
   const n = parseFloat(String(v == null ? '' : v).replace(/[^0-9.\-]/g, ''));
   return isNaN(n) ? 0 : n;
+}
+
+/* 營運總表的「訂購品項分析」是轉置版面：一欄一個品項、一列一種數字。
+
+     【訂購品項分析】
+     "【奶蓋類 (數量:35, 小計:$2,950, 比率:44%)】"
+     ,台東紅烏龍奶蓋,茉莉綠茶奶蓋,...      ← 品名（第一格是空的）
+     數量,7,5,...
+     小計,$560,$400,...
+
+   微碧自己就把類別分好了（奶蓋類／純茶類／鮮奶茶類／袋子／周邊…），
+   所以不用我猜「哪些算飲料」。小計也只有這裡有 —— 訂單列表只有
+   整張單的總價，拆不出單品營收。
+
+   驗過 2026/09/07 的真實檔：26 個品項 4 類，小計加總 $6,663，
+   跟同一份報表的營業額一模一樣。 */
+function parseCategoryAnalysis(rows){
+  const out = [];
+  let start = -1;
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i][0] && rows[i][0].indexOf("訂購品項分析") >= 0) { start = i; break; }
+  }
+  if (start < 0) return out;
+
+  for (let i = start + 1; i < rows.length; ) {
+    const head = (rows[i] && rows[i][0]) || "";
+    const m = head.match(/^【(.+?)\s*\(數量:/);
+    if (!m) { i++; continue; }
+    const cat   = m[1];
+    const names = (rows[i+1] || []).slice(1);
+    const qtys  = (rows[i+2] || []);
+    const amts  = (rows[i+3] || []);
+    // 版面不如預期就跳過這一段，不要硬解出垃圾
+    if (qtys[0] !== "數量" || amts[0] !== "小計") { i++; continue; }
+    for (let k = 0; k < names.length; k++) {
+      const nm = (names[k] || "").trim();
+      if (!nm) continue;
+      out.push({ category: cat, name: nm,
+                 qty: num(qtys[k+1]), amount: num(amts[k+1]) });
+    }
+    i += 4;
+  }
+  return out;
 }
 
 function buildPayload(text) {

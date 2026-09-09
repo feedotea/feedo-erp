@@ -446,6 +446,16 @@ begin
                        from erp_pos_sales
                        where sales_on >= m_start and sales_on < m_end) x),
 
+    /* 營收組成：微碧自己分的類別（奶蓋類／純茶類／鮮奶茶類／袋子／周邊…）。
+       這是唯一能把周邊商品的錢跟飲料分開的來源 ——
+       訂單列表只有整張單的總價，拆不出單品營收。 */
+    'by_category', (select coalesce(jsonb_agg(jsonb_build_object(
+                        'category', category, 'qty', q, 'amount', a) order by a desc), '[]'::jsonb)
+                    from (select category, sum(qty) as q, sum(amount) as a
+                          from erp_pos_categories
+                          where sales_on >= m_start and sales_on < m_end
+                          group by category) c),
+
     'top',      (select coalesce(jsonb_agg(jsonb_build_object('name', pos_name, 'qty', q)
                                            order by q desc), '[]'::jsonb)
                  from (select pos_name, sum(qty) as q from erp_pos_sales
