@@ -247,7 +247,8 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   <div class="sec-eyebrow">煮好一桶就按一下</div>
   <div class="date-bar" id="brew-date-bar">
     <span id="brew-date-label">記錄日期：今天</span>
-    <input type="date" id="brew-date" onchange="onBrewDateChange()">
+    <button class="mini-btn" id="brew-back-btn" onclick="showBrewDate()">補登其他天</button>
+    <input type="date" id="brew-date" style="display:none" onchange="onBrewDateChange()">
   </div>
   <div class="seg-tabs" id="seg-tabs" style="display:none"></div>
   <div class="card" id="brew-list"></div>
@@ -727,8 +728,10 @@ function renderBrew(){
   $("#fc-total").textContent=total;
   const basis=$("#fc-basis");
   if(basis){
+    // 「手填預估 / 實際耗用」是給店長判斷準不準的，店員不需要知道
     const actual=teas().some(t=>t.avgIsActual);
-    basis.innerHTML=(actual?"依近 28 天實際耗用":"依手填預估用量")+"<br>明天建議備 <b>"+(parts.join("・")+" 桶")+"</b>";
+    const note=isManager() ? `<span style="opacity:.6">（${actual?"依近 28 天實際耗用":"依手填預估"}）</span><br>` : "";
+    basis.innerHTML=note+"明天建議備 <b>"+(parts.join("・")+" 桶")+"</b>";
   }
   updateBrewPending();
   renderTodo();
@@ -739,11 +742,11 @@ function updateBrewPending(){
   const el=$("#brew-pending");
   const rev=parseFloat(($("#today-rev")||{}).value)||0;
   if(el) el.textContent = n ? `今天已記 ${n} 桶 · 停手幾秒後自動存檔` : "";
-  const btn=$("#submit-brew") && $("#submit-brew").querySelector("button");
-  if(btn){
-    if(n||rev){ btn.textContent=n?`立即存檔（${n} 桶）`:"存今日營收"; btn.disabled=false; btn.style.opacity="1"; }
-    else { btn.textContent="今天沒有待存的紀錄"; btn.disabled=true; btn.style.opacity=".35"; }
-  }
+  // 沒東西可存就整條收掉，不要留一顆按不動的灰按鈕佔畫面
+  const bar=$("#submit-brew");
+  const btn=bar && bar.querySelector("button");
+  if(btn && (n||rev)) btn.textContent = n ? `立即存檔（${n} 桶）` : "存今日營收";
+  if(bar && curScreen==="brew") bar.classList.toggle("hidden", !(n||rev));
 }
 
 /* 真正寫進雲端。停手 8 秒自動觸發，也可以手動按「立即存檔」。 */
@@ -779,6 +782,12 @@ async function flushBrew(){
 }
 const submitBrew=flushBrew;   // 底部按鈕沿用同一條路
 
+/* 補登是少數情況，日期框平常收起來，需要才展開 */
+function showBrewDate(){
+  $("#brew-back-btn").style.display="none";
+  const el=$("#brew-date"); el.style.display="";
+  try{ el.focus(); if(el.showPicker) el.showPicker(); }catch(e){}
+}
 function onBrewDateChange(){
   const v=$("#brew-date").value;
   const today=localDate();
@@ -787,6 +796,8 @@ function onBrewDateChange(){
     brewDate=null;
     $("#brew-date-label").textContent="記錄日期：今天";
     bar.classList.remove("back");
+    $("#brew-back-btn").style.display="";      // 回到今天就把日期框收回去
+    $("#brew-date").style.display="none";
   }else{
     brewDate=v;
     const wk=["日","一","二","三","四","五","六"][new Date(v).getDay()];
@@ -810,7 +821,7 @@ function renderTodo(){
     const d=(new Date(today)-new Date(String(o.ordered_on).slice(0,10)))/86400000;
     return d>=5;
   });
-  if(stale.length) li.push(`<b>${stale.length}</b> 筆叫貨等超過 5 天還沒到`);
+  if(stale.length) li.push(`<b>${stale.length}</b> 筆叫貨等超過 5 天還沒到　<button class="go" onclick="nav('order')">去看</button>`);
 
   box.innerHTML = li.length
     ? `<div class="todo"><div class="t">今天還沒做</div><ul>${li.map(x=>`<li>・${x}</li>`).join("")}</ul></div>`
@@ -1016,7 +1027,7 @@ function renderOrder(){
         <div class="s">已叫 ${(()=>{const o=pendingOrders.find(x=>x.item_code===i.code);return o?`${o.qty}${o.unit} · ${i.supplier}`:i.supplier;})()}</div></div>
         <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
           <button class="copy-btn" style="border-color:var(--ok);color:var(--ok)" onclick="openReceive('${i.code}')">✓ 到貨</button>
-          <button class="copy-btn" style="border-color:var(--grey);color:var(--grey);font-size:10px;padding:4px 8px" onclick="cancelOrdered('${i.code}')">取消</button>
+          <button class="copy-btn" style="border-color:var(--grey);color:var(--grey);font-size:10px;padding:4px 8px" onclick="cancelOrdered('${i.code}')">取消標記</button>
         </div>`;
       wc.appendChild(row);
     });
@@ -1731,6 +1742,7 @@ function nav(scr){
   ["brew","log","order","inv","expense","report","recon","stocktake"].forEach(s=>$("#scr-"+s).classList.toggle("hidden",s!==scr));
   [...document.querySelectorAll(".tab")].forEach(t=>t.classList.toggle("on",t.dataset.scr===scr));
   $("#submit-brew").classList.toggle("hidden",scr!=="brew");
+  if(scr==="brew") updateBrewPending();
   $("#submit-log").classList.toggle("hidden",scr!=="log");
   $("#submit-expense").classList.toggle("hidden",scr!=="expense");
   $("#submit-stocktake").classList.toggle("hidden",scr!=="stocktake");
