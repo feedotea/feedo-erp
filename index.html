@@ -229,7 +229,7 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   <div class="date" id="today"></div>
   <button onclick="signOut()" style="position:absolute;top:12px;right:14px;background:none;border:1px solid #3a3a3a;color:#8A8A8A;font-size:10px;letter-spacing:1px;padding:5px 9px;border-radius:2px;cursor:pointer">登出</button>
 </div>
-<div class="modebar">
+<div class="modebar" id="modebar">
   <button class="on" id="mode-stock" onclick="setMode('stock')">今天 TODAY</button>
   <button id="mode-money" onclick="setMode('money')">本月 MONTH</button>
 </div>
@@ -573,6 +573,8 @@ const isManager = () => !!me && (me.role === "manager" || me.role === "owner");
    店員把按鈕叫出來也一樣會被 RPC 擋掉。*/
 function applyRole(){
   const mgr = isManager();
+  // 店員只有「今天」一種模式，一顆按鈕的切換列沒有意義，整條收掉
+  $("#modebar").style.display    = mgr ? "" : "none";
   $("#mode-money").style.display = mgr ? "" : "none";
   $("#st-val-box").style.display = mgr ? "" : "none";   // 庫存總值 = 成本資訊
   // 每天的營業額和進貨單價都是錢，店員不該看到
