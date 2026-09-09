@@ -217,13 +217,39 @@ function parseCSV(text) {
 
 /* "台東紅烏龍鮮奶茶奶蓋 x 2(1分甜,5分冰,封膜); 四杯袋"
    → [{name, qty, options}, ...]                       */
+/* 品名和選項的切法：從字串尾端往回數括號，找出跟最後一個 ')' 配對的 '('。
+
+   不能用 /\(([^()]*)\)$/ ——微碧的折扣是括號裡再包括號：
+     伯爵茶(1分甜,5分冰, (-45))
+   那個正規表示式遇到巢狀就整個失配，結果「打折的伯爵茶」會變成
+   一個獨立品項，不會併進伯爵茶的杯數裡。
+
+   往回數深度就能正確切在最外層：
+     伯爵茶(1分甜,5分冰, (-45))  → 伯爵茶 / 1分甜,5分冰, (-45)
+     FEEDO T-Shirt (黑-M)( (-30%)) → FEEDO T-Shirt (黑-M) / (-30%)
+   後者的 (黑-M) 是品名的一部分，本來就該留著。 */
+function splitTrailingParens(str){
+  const s = String(str||'').trim();
+  if (!s.endsWith(')')) return [s, ''];
+  let depth = 0;
+  for (let i = s.length - 1; i >= 0; i--) {
+    const c = s[i];
+    if (c === ')') depth++;
+    else if (c === '(') {
+      depth--;
+      if (depth === 0) return [s.slice(0, i).trim(), s.slice(i + 1, -1).trim()];
+    }
+  }
+  return [s, ''];          // 括號不成對就整串當品名，不要亂切
+}
+
 function parseOrderItems(cell) {
   const out = [];
   (cell || '').split(';').forEach(part => {
     part = part.trim(); if (!part) return;
     let options = '';
-    const m = part.match(/\(([^()]*)\)\s*$/);
-    if (m) { options = m[1]; part = part.slice(0, m.index).trim(); }
+    const sp = splitTrailingParens(part);
+    part = sp[0]; options = sp[1];
     let qty = 1;
     const q = part.match(/\s*[xX×]\s*(\d+)\s*$/);
     if (q) { qty = parseInt(q[1], 10); part = part.slice(0, q.index).trim(); }
@@ -282,4 +308,19 @@ function testParse() {
                  '　總件數：' + p.items.reduce((s, i) => s + i.qty, 0));
     });
   });
+}
+
+
+/* 一次性工具：把「已匯入」標籤全部拿掉，讓 run() 重新處理所有信。
+   解析邏輯改過之後才需要跑這個，平常不要動。
+   跑之前記得先在 Supabase 清掉 erp_pos_imports（會連帶清掉明細）。*/
+function reimportAll() {
+  const label = GmailApp.getUserLabelByName(CFG.label);
+  if (!label) { Logger.log('沒有這個標籤，不用清'); return; }
+  let n = 0, threads;
+  do {
+    threads = label.getThreads(0, 100);
+    threads.forEach(t => { t.removeLabel(label); n++; });
+  } while (threads.length === 100);
+  Logger.log('已清除 ' + n + ' 封信的標籤，接下來執行 run() 會重新匯入');
 }
