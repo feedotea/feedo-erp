@@ -612,6 +612,9 @@ function mapItem(v){
     packG: Number(v.pack_g) || PACK_G,
     avgPerDay: Number(v.avg_per_day), avgIsActual: !!v.avg_is_actual,
     avgManual: Number(v.avg_per_day_manual),
+    posRole: v.pos_role || null,
+    orderUnit: v.order_unit || null,
+    orderPack: Number(v.order_pack) || 0,
     onOrder: !!v.on_order, note: v.note || "", sortOrder: v.sort_order || 0
   };
 }
@@ -992,15 +995,16 @@ async function submitLog(){
 }
 
 /* 叫貨 */
-const G_PER_JIN=600; // 一斤=600g
-// 叫貨量：茶葉換成「斤」無條件進位，其他維持原單位
+const G_PER_JIN=600; // 一斤=600g（舊資料沒設 order_pack 時的後備值）
+/* 叫貨要講廠商聽得懂的單位：茶葉論斤、封膜論卷、紙杯論箱。
+   order_pack = 一個採購單位等於幾個庫存單位，無條件進位到整數。 */
 function orderQty(i){
-  const needG=Math.ceil(i.safe*1.5-i.bal); // 原單位的建議量
-  if(i.tea && i.unit==="g"){
-    const jin=Math.ceil(needG/G_PER_JIN); // 進位到整斤
-    return {qty:jin, unit:"斤", grams:jin*G_PER_JIN};
+  const needBase=Math.ceil(i.safe*1.5-i.bal);   // 庫存單位的缺口
+  if(i.orderUnit && i.orderPack>0){
+    const n=Math.ceil(needBase/i.orderPack);
+    return {qty:n, unit:i.orderUnit, grams:n*i.orderPack};
   }
-  return {qty:needG, unit:i.unit, grams:needG};
+  return {qty:needBase, unit:i.unit, grams:needBase};
 }
 function renderOrder(){
   const body=$("#order-body");
@@ -1082,7 +1086,8 @@ let receiveCode=null;
 // 叫貨單位可能跟庫存單位不同：茶葉叫「斤」，但庫存記 g
 function ordToBase(it,qty,unit){
   if(!unit||unit===it.unit) return qty;
-  if(unit==="斤" && it.unit==="g") return qty*G_PER_JIN;
+  if(it.orderUnit && unit===it.orderUnit && it.orderPack>0) return qty*it.orderPack;
+  if(unit==="斤" && it.unit==="g") return qty*G_PER_JIN;   // 後備
   return qty;
 }
 function openReceive(code){

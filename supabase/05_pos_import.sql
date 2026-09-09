@@ -17,16 +17,10 @@
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
--- 先清掉上一版 05 的殘留物。
--- 上一版假設報表是「一列一個品項」的平表，欄位和函式簽章都不一樣；
--- create or replace 遇到不同簽章會變成「多一個多載」而不是取代，
--- 所以一定要先 drop。這些表在正式使用前不會有資料，砍掉是安全的。
+-- 注意：這個檔案可以重複執行，不會動到既有資料。
+-- （早期版本這裡有一段 drop table 的換版清理，資料進來之後那段
+--   會把匯入紀錄整個刪掉，所以移除了。真的要重來請手動 delete。）
 -- ---------------------------------------------------------------------
-drop function if exists erp_pos_import(uuid, text, text, jsonb, jsonb, text);
-drop function if exists erp_pos_config(text);
-drop table    if exists erp_pos_columns;
-drop table    if exists erp_pos_sales   cascade;
-drop table    if exists erp_pos_imports cascade;
 
 create table if not exists erp_pos_imports (
   id          uuid primary key,
@@ -124,6 +118,39 @@ begin
 
   get diagnostics n = row_count;
   update erp_pos_imports set row_count = n where id = p_id;
+
+  /* 包材自動扣料。
+     紙杯、封膜、袋子不需要配方 —— POS 的選項欄已經寫著答案：
+       cup   飲料杯數扣掉自帶環保杯的（客人自己帶杯就不該扣）
+       film  同紙杯（每杯都封膜；POS 那個「封膜」選項是特別註記用的，
+             1086 杯只出現 2 次，不是每次都記）
+       bag   賣出的兩杯袋／四杯袋
+     糖、鮮奶、鮮奶油要真的配方，不在這裡處理。
+
+     「哪些算飲料」跟報表用同一條推斷：有甜度或冰塊選項、或品名
+     含茶/烏龍。等品項分類做完會換成正式分類。 */
+  delete from erp_stock_moves
+   where kind = 'use' and note = 'POS自動扣料' and occurred_on = any(dates);
+
+  insert into erp_stock_moves (id, item_code, kind, qty_delta, occurred_on, note, created_by)
+  select gen_random_uuid(), i.code, 'use', -u.q, u.d, 'POS自動扣料', uid
+  from (
+    select d, role, sum(q) as q from (
+      -- 紙杯和封膜：飲料杯數，扣掉自帶環保杯的
+      select sales_on as d, r.role, qty as q
+        from erp_pos_sales, (values ('cup'),('film')) as r(role)
+       where sales_on = any(dates)
+         and (options ~ '甜|冰' or pos_name ~ '茶|烏龍')
+         and options not like '%環保杯%'
+      union all
+      -- 袋子：賣出幾個就用掉幾個
+      select sales_on, 'bag', qty
+        from erp_pos_sales
+       where sales_on = any(dates) and pos_name like '%杯袋%'
+    ) z group by d, role
+  ) u
+  join erp_items i on i.pos_role = u.role and i.active
+  where u.q > 0;
 
   -- 營收以 POS 為準，直接蓋掉手 key 的值
   for d in select * from jsonb_array_elements(p_days) loop

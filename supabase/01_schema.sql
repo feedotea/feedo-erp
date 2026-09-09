@@ -96,6 +96,37 @@ create table if not exists erp_items (
 
 create index if not exists erp_items_active_idx on erp_items (active, cat, sort_order);
 
+/* POS 自動扣料用的角色。
+   紙杯、封膜、袋子的用量不需要配方 —— POS 的選項欄已經寫著答案：
+     cup   飲料杯數扣掉自帶環保杯的
+     film  選項含「封膜」的杯數
+     bag   賣出的兩杯袋／四杯袋
+   糖、鮮奶、鮮奶油要真的配方，不在這裡處理。 */
+alter table erp_items add column if not exists pos_role text;
+do $$ begin
+  alter table erp_items add constraint erp_items_pos_role_chk
+    check (pos_role in ('cup','film','bag'));
+exception when duplicate_object then null; end $$;
+
+/* 採購單位和庫存單位常常不一樣：
+     封膜 買「卷」(3900 個)、庫存記「個」
+     茶葉 買「斤」(600 g)、庫存記「g」
+     紙杯 買「箱」、庫存記「個」
+   叫貨要講廠商聽得懂的單位，庫存要用消耗的單位，所以兩個都存。
+   order_pack = 一個採購單位等於幾個庫存單位。 */
+alter table erp_items add column if not exists order_unit text;
+alter table erp_items add column if not exists order_pack numeric(12,3);
+
+update erp_items set order_unit='斤', order_pack=600
+ where is_tea and unit='g' and order_unit is null;
+
+update erp_items set order_unit='卷', order_pack=3900, cost=round(600.0/3900, 4)
+ where code='PKG-02' and order_unit is null;
+
+update erp_items set pos_role='cup'  where code='PKG-01' and pos_role is null;
+update erp_items set pos_role='film' where code='PKG-02' and pos_role is null;
+update erp_items set pos_role='bag'  where code='PKG-04' and pos_role is null;
+
 -- ---------------------------------------------------------------------
 -- 2. 庫存異動帳（唯一的庫存真相來源）
 -- ---------------------------------------------------------------------
@@ -216,6 +247,7 @@ create or replace view erp_v_items as
 select
   i.code, i.name, i.cat, i.unit, i.safe_qty, i.cost, i.supplier,
   i.is_tea, i.pack_g, i.note, i.sort_order, i.avg_per_day_manual,
+  i.pos_role, i.order_unit, i.order_pack,
   b.bal,
   -- 累積 14 天以上實際資料才敢用真實數據，否則沿用手填值
   case when u.days_with_data >= 14 and u.avg_actual > 0
