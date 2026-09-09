@@ -114,6 +114,8 @@ declare
   n      int;
   dfrom  date;
   dto    date;
+  v_existing uuid;
+  v_import   uuid;
   tot    numeric := 0;
   ords   int := 0;
 begin
@@ -121,21 +123,28 @@ begin
     raise exception '沒有可匯入的營業日' using errcode = '22023';
   end if;
 
-  if exists (select 1 from erp_pos_imports
-             where source = p_source and file_hash = p_file_hash) then
-    return jsonb_build_object('ok', false, 'reason', 'duplicate',
-                              'message', '這份檔案已經匯入過了');
-  end if;
+  n := 0;   -- 只補分類時不會跑到明細那段，先給個值免得回傳 null
+  select id into v_existing from erp_pos_imports
+   where source = p_source and file_hash = p_file_hash;
 
   select array_agg((x->>'date')::date), min((x->>'date')::date), max((x->>'date')::date),
          sum((x->>'revenue')::numeric), sum(coalesce((x->>'orders')::int, 0))
     into dates, dfrom, dto, tot, ords
     from jsonb_array_elements(p_days) x;
 
-  insert into erp_pos_imports (id, source, file_name, file_hash,
-                               date_from, date_to, order_count, revenue, imported_by)
-  values (p_id, p_source, p_file_name, p_file_hash, dfrom, dto, ords, tot, uid);
+  /* 同一份檔案匯過就不重複匯明細。
+     但分類是後來加解析才拿得到的新資訊 —— 如果因為這樣就要把整批
+     資料刪掉重匯，代價太大也太危險。所以重複的檔案照樣補分類。*/
+  if v_existing is not null then
+    v_import := v_existing;
+  else
+    v_import := p_id;
+    insert into erp_pos_imports (id, source, file_name, file_hash,
+                                 date_from, date_to, order_count, revenue, imported_by)
+    values (p_id, p_source, p_file_name, p_file_hash, dfrom, dto, ords, tot, uid);
+  end if;
 
+ if v_existing is null then
   -- 同一天重匯（補了漏單再匯一次）→ 該日整批換掉，不疊加
   delete from erp_pos_sales where sales_on = any(dates);
 
@@ -145,7 +154,7 @@ begin
   from jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) r;
 
   get diagnostics n = row_count;
-  update erp_pos_imports set row_count = n where id = p_id;
+  update erp_pos_imports set row_count = n where id = v_import;
 
   /* 包材自動扣料。
      紙杯、封膜、袋子不需要配方 —— POS 的選項欄已經寫著答案：
@@ -179,12 +188,13 @@ begin
   ) u
   join erp_items i on i.pos_role = u.role and i.active
   where u.q > 0;
+ end if;   -- v_existing is null
 
   -- 營運總表的品項分析：類別、單品營收
   if p_cats is not null and jsonb_array_length(p_cats) > 0 then
     delete from erp_pos_categories where sales_on = dto;
     insert into erp_pos_categories (import_id, sales_on, category, pos_name, qty, amount)
-    select p_id, dto, c->>'category', c->>'name',
+    select v_import, dto, c->>'category', c->>'name',
            coalesce((c->>'qty')::numeric, 0), coalesce((c->>'amount')::numeric, 0)
     from jsonb_array_elements(p_cats) c;
 
@@ -196,7 +206,7 @@ begin
   end if;
 
   -- 營收以 POS 為準，直接蓋掉手 key 的值
-  for d in select * from jsonb_array_elements(p_days) loop
+  for d in select * from jsonb_array_elements(p_days) where v_existing is null loop
     insert into erp_revenue (revenue_on, amount, note, updated_by, updated_at)
     values ((d->>'date')::date, (d->>'revenue')::numeric, '微碧匯入', uid, now())
     on conflict (revenue_on) do update set
@@ -204,9 +214,10 @@ begin
       updated_by = excluded.updated_by, updated_at = now();
   end loop;
 
-  return jsonb_build_object('ok', true, 'rows', n, 'orders', ords,
-                            'revenue', tot, 'date_from', dfrom, 'date_to', dto,
-                            'days', array_length(dates, 1));
+  return jsonb_build_object('ok', true,
+    'reason', case when v_existing is null then 'imported' else 'categories_only' end,
+    'rows', n, 'orders', ords, 'revenue', tot,
+    'date_from', dfrom, 'date_to', dto, 'days', array_length(dates, 1));
 end $$;
 
 -- ---------------------------------------------------------------------
