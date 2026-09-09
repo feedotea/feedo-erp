@@ -16,6 +16,7 @@
 | 6 | `06_analytics.sql` | 營運分析（`erp_analytics`，只讀，店長限定） |
 | 7 | `07_ordering.sql` | 叫貨改用到貨天數（`lead_days`/`cover_days`、在途量） |
 | 8 | `08_orders.sql` | 逐筆訂單（時段分析、單筆訂單分析） |
+| 9 | `09_labor.sql` | 設定表 `erp_settings` + 逐時段逐星期出杯量（人力估算） |
 
 順序不能顛倒（03 要先有 01、02 建立的物件才收得掉權限）。
 

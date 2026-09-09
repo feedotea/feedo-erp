@@ -544,6 +544,9 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   <div class="sec-eyebrow">時段 · 幾點忙</div>
   <div class="card"><div class="trend" id="an-hours" style="height:118px"></div></div>
   <div class="card" id="an-hour-note" style="padding:0"></div>
+  <div class="sec-eyebrow">人力估算</div>
+  <div class="card" id="an-labor-set"></div>
+  <div class="card" id="an-labor"></div>
   <div class="sec-eyebrow">一單買多少</div>
   <div class="card" id="an-basket"></div>
   <div class="sec-eyebrow">客人怎麼點</div>
@@ -2272,12 +2275,15 @@ async function loadAnalytics(force){
   const want=anMonths;
   if(!analytics)$("#an-insights").innerHTML=`<div class="empty"><div class="t">分析中…</div></div>`;
   try{
-    const [r,ord]=await Promise.all([
+    const [r,ord,st]=await Promise.all([
       callRpc("erp_analytics",{p_months:want}),
       // 訂單層是後來才有的，舊帳號可能還沒部署，失敗就當沒有
       callRpc("erp_order_analytics",{p_months:want}).catch(e=>{
-        console.warn("訂單分析讀取失敗",e); return null; })
+        console.warn("訂單分析讀取失敗",e); return null; }),
+      callRpc("erp_get_settings").catch(e=>{
+        console.warn("設定讀取失敗",e); return null; })
     ]);
+    if(st && st.labor) labor={...labor, ...st.labor};
     if(want!==anMonths)return;          // 期間又被切走了，這份結果已經過時
     r.orderStats=ord;
     analytics=r; anAt=Date.now();
@@ -2405,7 +2411,30 @@ function buildInsights(a){
       `POS 預設值設成 ${eh(sw[0].name)}／${eh(ic[0].name)}，點單少按兩下；糖量備料照這個比例抓。`);
   }
 
-  /* 8. 資料缺口。這些沒補，上面的毛利就只是「毛利」，不是淨利。 */
+  /* 8. 人力。只有店長填了目前排班才比得出來 —— 沒有那個數字，
+     講「需求 62 人時」對他來說沒有意義。 */
+  const lp=laborPlan(a.orderStats);
+  const cw=num(labor.current_week_hours);
+  if(lp && cw>0){
+    const gap=cw-lp.week, pct=Math.round(gap/lp.week*100);
+    if(pct>=25){
+      add("warn",`人力比「做得完」多了 ${pct}%`,
+        `出杯量算下來一週需要 ${Math.round(lp.week)} 人時，目前排 ${Math.round(cw)} 人時，
+         多 ${Math.round(gap)} 人時、約 ${money(gap*num(labor.wage)*4.33)}／月。
+         最忙的星期${WDAY[lp.rows[0].dow]}尖峰也只要 ${lp.rows[0].peak} 個人。`,
+        `每月 ${money(gap*num(labor.wage)*4.33)}`,
+        `先別急著砍人 —— 這個差要留給新人、教育訓練、補貨、臨時請假。
+         但可以看「每天要幾人時」那張表：離峰時段（人數顯示 1 的那幾格）
+         如果現在排 2 個人，那幾個小時就是可以先調整的地方。`);
+    }else if(pct<=-10){
+      add("risk","尖峰人力不足",
+        `出杯量算下來一週需要 ${Math.round(lp.week)} 人時，目前只排 ${Math.round(cw)} 人時。
+         最忙的星期${WDAY[lp.rows[0].dow]}尖峰要 ${lp.rows[0].peak} 個人。`,"",
+        "尖峰靠硬撐的話，出杯速度和客訴會先反應出來。先補最忙那兩天的中午。");
+    }
+  }
+
+  /* 9. 資料缺口。這些沒補，上面的毛利就只是「毛利」，不是淨利。 */
   const gaps=[];
   if(!expenses.length) gaps.push("開銷一筆都沒記（房租、水電、人事）");
   // 有品項是負庫存，代表 POS 一直在扣、卻沒有起始數量 —— 一樣是沒盤過
@@ -2419,6 +2448,125 @@ function buildInsights(a){
   return R;
 }
 
+/* ---------------------------------------------------------------
+   人力估算
+   「一天要幾個人」= 那個小時要出幾杯 ÷ 一個人一小時能出幾杯。
+   左邊資料庫已經知道（訂單有付款時間）；右邊只有店裡知道，所以
+   是設定值不是猜的 —— 隨便寫死一個數字，算出來的班表沒人敢照排。
+
+   算的是「這些杯子最少要幾個人時才做得完」，不是「該排幾個人」。
+   兩者的差就是彈性：新人、教育訓練、客訴、補貨、臨時狀況。
+   所以下面一律講「下限」，不講「你應該排幾人」。
+   --------------------------------------------------------------- */
+let labor={cups_per_hour:45, min_staff:1, prep_hours:2, wage:200, current_week_hours:0};
+
+function laborPlan(os){
+  const hd=(os&&os.hours_dow)||[];
+  if(!hd.length) return null;
+  const cph=Math.max(1,num(labor.cups_per_hour));
+  const byDow={};
+  hd.forEach(x=>{
+    const d=x.dow;
+    (byDow[d]=byDow[d]||{dow:d, days:x.days, hours:[], cups:0, manHours:0, peak:0})
+      .hours.push(x);
+  });
+  const rows=Object.values(byDow).map(g=>{
+    g.hours.sort((a,b)=>a.h-b.h);
+    g.plan=g.hours.map(x=>{
+      const c=num(x.cups_per_day);
+      const n=Math.max(num(labor.min_staff), Math.ceil(c/cph));
+      g.cups+=c; g.manHours+=n; g.peak=Math.max(g.peak,n);
+      return {h:x.h, cups:c, n};
+    });
+    g.prep=num(labor.prep_hours)*Math.max(1,num(labor.min_staff));
+    g.total=g.manHours+g.prep;
+    return g;
+  }).sort((a,b)=>b.total-a.total);
+  const week=rows.reduce((s,r)=>s+r.total,0);
+  return {rows, week, cph};
+}
+
+function renderLabor(os){
+  const box=$("#an-labor"), setBox=$("#an-labor-set");
+  const fld=(k,label,hint,step)=>`<div class="st-row">
+    <div style="flex:1;min-width:0"><div class="nm">${label}</div>
+      <div style="font-size:11px;color:var(--grey)">${hint}</div></div>
+    <input class="txt-input" style="width:86px;padding:9px;text-align:center" type="number"
+      inputmode="decimal" step="${step||1}" id="lb-${k}" value="${num(labor[k])}"
+      onchange="saveLabor()"></div>`;
+  setBox.innerHTML=
+    fld("cups_per_hour","一人一小時幾杯","含收銀、封膜、洗杯的實際節奏")+
+    fld("min_staff","營業中最少留幾人","再閒也不能只剩零個人顧店")+
+    fld("prep_hours","每天備料收攤幾小時","煮茶、備料、打烊清洗")+
+    fld("wage","時薪","算成本用")+
+    fld("current_week_hours","目前一週排幾人時","例：2 人 × 8 小時 × 6 天 = 96");
+
+  const plan=laborPlan(os);
+  if(!plan){
+    box.innerHTML=`<div class="empty"><div class="ic">—</div>
+      <div class="t">要有訂單層資料才算得出來</div>
+      <div style="font-size:11px;margin-top:6px">把訂單列表 CSV 再匯一次就會有</div></div>`;
+    return;
+  }
+  const cur=num(labor.current_week_hours);
+  const diff=cur-plan.week;
+  const monthly=Math.round(diff*num(labor.wage)*4.33);
+
+  let html=`<div class="exp-cat-row" style="background:var(--news)">
+    <div style="display:flex;gap:16px;font-size:12px">
+      <div><div style="color:var(--grey);font-size:10px;letter-spacing:1px">一週需求下限</div>
+           <b style="font-size:16px">${Math.round(plan.week)} 人時</b></div>
+      ${cur?`<div><div style="color:var(--grey);font-size:10px;letter-spacing:1px">目前排班</div>
+           <b style="font-size:16px">${Math.round(cur)} 人時</b></div>
+      <div><div style="color:var(--grey);font-size:10px;letter-spacing:1px">差額</div>
+           <b style="font-size:16px;color:var(--${diff>0?"warn":"ok"})">${diff>0?"＋":""}${Math.round(diff)}</b></div>`:""}
+    </div></div>`;
+
+  if(cur && diff>0){
+    html+=`<div class="exp-cat-row"><div style="font-size:12.5px;line-height:1.75">
+      目前比「做得完」多了 <b>${Math.round(diff)} 人時／週</b>，
+      約 <b>${money(monthly)}／月</b>。
+      <div style="color:var(--grey);font-size:11px;margin-top:6px">
+        這個差不等於浪費 —— 新人、教育訓練、客訴、補貨、臨時請假都吃這裡。
+        但差到 30% 以上就值得看是不是某幾個時段排太滿。</div>
+    </div></div>`;
+  }else if(cur && diff<0){
+    html+=`<div class="exp-cat-row"><div style="font-size:12.5px;line-height:1.75">
+      目前排的比需求下限還少 <b>${Math.round(-diff)} 人時／週</b>。
+      <div style="color:var(--grey);font-size:11px;margin-top:6px">
+        代表尖峰時段是靠硬撐過去的。出杯速度和客訴通常會先反應出來。</div>
+    </div></div>`;
+  }else if(!cur){
+    html+=`<div class="exp-cat-row"><div style="font-size:12px;color:var(--grey);line-height:1.7">
+      在上面填「目前一週排幾人時」，就會算出跟需求差多少、一個月差多少錢。</div></div>`;
+  }
+
+  html+=`<div class="exp-cat-row" style="background:var(--news)">
+    <span class="nm" style="font-size:10px;letter-spacing:2.5px;color:var(--grey)">每天要幾人時</span></div>`;
+  html+=plan.rows.map(g=>`<div class="exp-cat-row">
+    <div class="top"><span class="nm">星期${WDAY[g.dow]}
+      <span style="font-weight:400;color:var(--grey);font-size:11px">${Math.round(g.cups)} 杯</span></span>
+      <span class="amt">${Math.round(g.total)} 人時 <span class="pct">尖峰 ${g.peak} 人</span></span></div>
+    <div style="font-size:11px;color:var(--grey);margin-top:5px;line-height:1.7;word-spacing:2px">
+      ${g.plan.map(p=>`<span style="white-space:nowrap">${p.h}點<b style="color:var(--ink)">${p.n}</b></span>`).join("　")}
+      　<span style="white-space:nowrap">備料 ${g.prep}</span></div>
+  </div>`).join("");
+
+  html+=`<div class="exp-cat-row"><div style="font-size:11px;color:var(--grey);line-height:1.7">
+    算法：那個小時的日均杯數 ÷ ${plan.cph} 杯，無條件進位，再取不低於 ${num(labor.min_staff)} 人。
+    只算出杯，不含備料收攤（另外加 ${num(labor.prep_hours)} 小時／天）。</div></div>`;
+  box.innerHTML=html;
+}
+
+async function saveLabor(){
+  ["cups_per_hour","min_staff","prep_hours","wage","current_week_hours"].forEach(k=>{
+    const el=$("#lb-"+k); if(el && el.value!=="") labor[k]=Number(el.value)||0;
+  });
+  renderLabor(analytics&&analytics.orderStats);
+  try{ await callRpc("erp_set_setting",{p_key:"labor",p_value:labor}); }
+  catch(e){ toast("設定沒存到雲端："+(e.message||e.code)); }
+}
+
 /* 時段和單筆訂單。
    這兩塊要訂單層資料（付款時間、整單金額），是後來才開始存的。
    舊的匯入沒有 —— 與其畫一張空圖，不如直接說要重匯哪幾天。 */
@@ -2430,7 +2578,7 @@ function renderOrderStats(os){
     重複匯不會重複扣庫存。</div></div>`;
   if(!os || !num(os.with_time)){
     $("#an-hours").innerHTML=""; $("#an-hour-note").innerHTML=need;
-    $("#an-basket").innerHTML=need; return;
+    $("#an-basket").innerHTML=need; renderLabor(null); return;
   }
 
   const hrs=(os.hours||[]);
@@ -2489,6 +2637,7 @@ function renderOrderStats(os){
   html+=hd("一單幾件")+(os.sizes||[]).map(b=>
     bar(b.n>=6?"6 件以上":`${b.n} 件`,num(b.orders),sizeMax,Math.round(num(b.orders)/totalOrders*100)+"%")).join("");
   $("#an-basket").innerHTML=html;
+  renderLabor(os);
 }
 
 $("#an-seg").addEventListener("click",e=>{if(e.target.dataset.v)setAnMonths(+e.target.dataset.v);});
