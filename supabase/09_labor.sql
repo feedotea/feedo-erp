@@ -90,11 +90,17 @@ begin
     where s.sales_on >= d_from
     group by 1, 2
   ),
+  /* n_drinks 在「整張單只買周邊」時是 NULL，不是 0 ——
+     filter 掉全部就沒有值。直接 coalesce 到 o.items 會把杯套
+     算成飲料，尖峰杯數會灌水（6/21 11 點 88 杯變成 120 杯）。
+     只有「這張單根本沒有明細」時才退回 o.items。 */
   ob as (
     select o.sales_on, o.order_no, o.total, o.paid_at,
-           coalesce(li.n_items, o.items)  as n_items,
-           coalesce(li.n_drinks, o.items) as n_drinks,
-           coalesce(li.has_mds, false)    as has_mds
+           case when li.order_no is null then o.items
+                else coalesce(li.n_items, 0) end   as n_items,
+           case when li.order_no is null then o.items
+                else coalesce(li.n_drinks, 0) end  as n_drinks,
+           coalesce(li.has_mds, false)             as has_mds
     from o left join li on li.sales_on = o.sales_on and li.order_no = o.order_no
   ),
   -- 有付款時間的營業日數。時段的「日均」要除這個，不是除有那小時的天數
