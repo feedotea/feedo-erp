@@ -7,6 +7,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="theme-color" content="#1A1A1A">
 <title>FEEDO 店務</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root{
   --ink:#1A1A1A; --news:#F2F0EB; --paper:#FBFAF7;
@@ -23,7 +24,7 @@ body{
 }
 .serif{font-family:"Cormorant Garamond",Georgia,"Songti TC",serif}
 
-.appbar{background:var(--ink);color:var(--paper);padding:13px 18px 11px;flex-shrink:0;border-bottom:3px solid var(--gilt)}
+.appbar{position:relative;background:var(--ink);color:var(--paper);padding:13px 18px 11px;flex-shrink:0;border-bottom:3px solid var(--gilt)}
 .appbar .kick{font-size:10px;letter-spacing:3px;color:var(--silver);text-transform:uppercase}
 .appbar .title{font-family:"Cormorant Garamond",Georgia,serif;font-size:24px;font-weight:600;line-height:1;margin-top:2px;letter-spacing:.5px}
 .appbar .date{font-size:11px;color:var(--gilt);letter-spacing:1px;margin-top:3px}
@@ -41,10 +42,21 @@ body{
 .card{background:var(--paper);border:1px solid var(--line);border-radius:2px;margin-bottom:12px}
 .card-pad{padding:14px 16px}
 
-.tea-row{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid var(--line)}
+.tea-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}
 .tea-row:last-child{border-bottom:none}
+.brew-btn{border:1px solid var(--ink);background:var(--paper);color:var(--ink);border-radius:2px;padding:13px 0;width:62px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;text-align:center;flex-shrink:0}
+.brew-btn:active{background:var(--ink);color:var(--paper)}
+.brew-half{border-color:var(--line);color:var(--grey);width:46px;font-size:12px;font-weight:400}
+.brew-count{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;min-width:26px;text-align:right;flex-shrink:0}
+.brew-count.zero{color:var(--line)}
+.brew-undo{border:none;background:none;color:var(--grey);font-size:17px;cursor:pointer;padding:0 6px;line-height:1}
+.todo{background:var(--paper);border:1px solid var(--gilt);border-left:3px solid var(--gilt);border-radius:2px;padding:12px 14px;margin-bottom:14px}
+.todo .t{font-size:10px;letter-spacing:2.5px;color:var(--gilt);text-transform:uppercase;margin-bottom:8px}
+.todo li{list-style:none;font-size:13px;line-height:1.9;letter-spacing:.3px}
+.todo li b{color:var(--alert)}
+.todo .go{border:none;background:none;color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer;padding:0;font-family:inherit}
 .tea-name{font-size:17px;font-weight:600;letter-spacing:.5px}
-.tea-sub{font-size:11px;color:var(--grey);margin-top:1px;letter-spacing:.5px}
+.tea-sub{font-size:11px;color:var(--grey);margin-top:2px;letter-spacing:.3px;white-space:nowrap}
 .day-tag{display:inline-block;font-size:10px;letter-spacing:.5px;color:var(--ok);border:1px solid var(--ok);padding:1px 6px;border-radius:2px;margin-left:2px}
 .day-tag.low{color:var(--alert);border-color:var(--alert);font-weight:700}
 .date-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--paper);border:1px solid var(--line);border-radius:2px;padding:9px 12px;margin-bottom:10px}
@@ -198,63 +210,53 @@ select.txt-input{appearance:none;-webkit-appearance:none}
 </head>
 <body>
 
-<!-- ============ 密碼鎖 ============ -->
+<!-- ============ 登入（Supabase Auth）============ -->
 <div id="lock-screen" style="position:fixed;inset:0;z-index:999;background:#1A1A1A;color:#F2F0EB;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px">
   <div style="font-family:'Cormorant Garamond',Georgia,serif;font-size:34px;font-weight:600;letter-spacing:1px">FEEDO</div>
   <div style="font-size:11px;letter-spacing:3px;color:#8A8A8A;margin-bottom:28px">店務管理系統</div>
-  <input id="lock-input" type="password" autocapitalize="off" autocomplete="off" placeholder="請輸入密碼"
-    style="width:80%;max-width:280px;text-align:center;font-size:18px;padding:14px;border:1px solid #B8923A;background:#F2F0EB;color:#1A1A1A;border-radius:3px;letter-spacing:2px"
-    onkeydown="if(event.key==='Enter')tryUnlock()">
-  <button onclick="tryUnlock()" style="margin-top:16px;width:80%;max-width:280px;padding:14px;background:#B8923A;color:#1A1A1A;border:none;border-radius:3px;font-size:15px;font-weight:600;letter-spacing:2px;cursor:pointer">進入</button>
-  <div id="lock-err" style="color:#C0392B;font-size:13px;margin-top:14px;height:18px"></div>
+  <input id="lg-email" type="email" autocapitalize="off" autocorrect="off" autocomplete="username" placeholder="帳號 Email"
+    style="width:80%;max-width:280px;text-align:center;font-size:16px;padding:14px;border:1px solid #B8923A;background:#F2F0EB;color:#1A1A1A;border-radius:3px;margin-bottom:10px">
+  <input id="lg-pw" type="password" autocapitalize="off" autocomplete="current-password" placeholder="密碼"
+    style="width:80%;max-width:280px;text-align:center;font-size:16px;padding:14px;border:1px solid #B8923A;background:#F2F0EB;color:#1A1A1A;border-radius:3px;letter-spacing:2px"
+    onkeydown="if(event.key==='Enter')signIn()">
+  <button id="lg-btn" onclick="signIn()" style="margin-top:16px;width:80%;max-width:280px;padding:14px;background:#B8923A;color:#1A1A1A;border:none;border-radius:3px;font-size:15px;font-weight:600;letter-spacing:2px;cursor:pointer">登入</button>
+  <div id="lock-err" style="color:#C0392B;font-size:13px;margin-top:14px;height:36px;text-align:center;line-height:1.4;max-width:300px"></div>
 </div>
-<script>
-const _K = "RkRPOjpmZWVkbzYyMDI6Ong5";
-function _getPw(){ try{ return atob(_K).split("::")[1]; }catch(e){ return ""; } }
-
-function tryUnlock(){
-  const v=document.getElementById("lock-input").value;
-  if(v===_getPw()){
-    document.getElementById("lock-screen").style.display="none";
-    try{sessionStorage.setItem("feedo_unlocked","1");}catch(e){}
-  }else{
-    document.getElementById("lock-err").textContent="密碼錯誤，再試一次";
-    document.getElementById("lock-input").value="";
-  }
-}
-// 同一次開啟 App 期間解鎖過就不用再輸(關閉分頁後要重輸)
-try{ if(sessionStorage.getItem("feedo_unlocked")==="1"){ document.getElementById("lock-screen").style.display="none"; } }catch(e){}
-</script>
 
 <div class="appbar">
-  <div class="kick">FEEDO · 店務管理</div>
+  <div class="kick">FEEDO · 店務管理 · <span id="role-tag"></span></div>
   <div class="title serif" id="appTitle">Daybook</div>
   <div class="date" id="today"></div>
+  <button onclick="signOut()" style="position:absolute;top:12px;right:14px;background:none;border:1px solid #3a3a3a;color:#8A8A8A;font-size:10px;letter-spacing:1px;padding:5px 9px;border-radius:2px;cursor:pointer">登出</button>
 </div>
 <div class="modebar">
-  <button class="on" id="mode-stock" onclick="setMode('stock')">庫存 STOCK</button>
-  <button id="mode-money" onclick="setMode('money')">帳務 BOOKS</button>
+  <button class="on" id="mode-stock" onclick="setMode('stock')">今天 TODAY</button>
+  <button id="mode-money" onclick="setMode('money')">本月 MONTH</button>
 </div>
+
+<div id="sync-badge" style="display:none;background:#C8902A;color:#1A1A1A;font-size:12px;letter-spacing:.5px;padding:8px 16px;text-align:center;font-weight:600"></div>
 
 <!-- 煮茶 -->
 <div class="screen" id="scr-brew">
   <div class="forecast">
     <div class="big serif" id="fc-total">14</div>
-    <div class="lbl">依過去 7 天平均<br>明天建議備 <b id="fc-detail"></b></div>
+    <div class="lbl" id="fc-basis">明天建議備 <b id="fc-detail"></b></div>
     <button class="fc-export" onclick="openBrewPDF()">匯出<br>PDF</button>
   </div>
-  <div class="sec-eyebrow">今天各茶總共煮了幾桶</div>
+  <div id="todo-card"></div>
+  <div class="sec-eyebrow">煮好一桶就按一下</div>
   <div class="date-bar" id="brew-date-bar">
     <span id="brew-date-label">記錄日期：今天</span>
     <input type="date" id="brew-date" onchange="onBrewDateChange()">
   </div>
   <div class="seg-tabs" id="seg-tabs" style="display:none"></div>
   <div class="card" id="brew-list"></div>
+  <div id="brew-pending" style="font-size:11px;color:var(--grey);letter-spacing:.5px;text-align:center;padding:8px 0;min-height:26px"></div>
   <div class="sec-eyebrow">打烊 · 今日營收</div>
   <div class="card card-pad">
     <div class="field" style="margin-bottom:0">
       <label>今日營業額（看微碧當日總額，填數字）</label>
-      <input class="num-input" id="today-rev" type="number" inputmode="decimal" placeholder="0">
+      <input class="num-input" id="today-rev" type="number" inputmode="decimal" placeholder="0" oninput="updateBrewPending()">
       <div style="font-size:11px;color:var(--grey);margin-top:6px;letter-spacing:.5px" id="rev-hint">跟今天用掉的料一起送出，就能算出今日毛利</div>
     </div>
   </div>
@@ -285,14 +287,13 @@ try{ if(sessionStorage.getItem("feedo_unlocked")==="1"){ document.getElementById
   <div class="summary-strip">
     <div class="stat"><div class="v" id="st-total">15</div><div class="k">總品項</div></div>
     <div class="stat"><div class="v alert" id="st-low">0</div><div class="k">該叫貨</div></div>
-    <div class="stat"><div class="v serif" id="st-val">$0</div><div class="k">庫存值</div></div>
+    <div class="stat" id="st-val-box"><div class="v serif" id="st-val">$0</div><div class="k">庫存值</div></div>
   </div>
   <div style="display:flex;gap:8px;margin-bottom:8px">
-    <button class="mini-btn" style="flex:1" onclick="openStocktake()">📋 月度盤點</button>
     <button class="mini-btn" style="flex:1" onclick="openWaste()">🗑 記損耗/報廢</button>
   </div>
   <div style="display:flex;gap:8px;margin-bottom:12px">
-    <button class="mini-btn" style="flex:1;border-color:var(--ink);color:var(--ink)" onclick="openItemEdit(null)">＋ 新增品項</button>
+    <button class="mini-btn" style="flex:1;border-color:var(--ink);color:var(--ink)" id="btn-new-item" onclick="openItemEdit(null)">＋ 新增品項</button>
   </div>
   <div class="cat-tab" id="cat-tabs"></div>
   <div class="card" id="inv-list"></div><div class="scroll-hint"></div>
@@ -308,12 +309,13 @@ try{ if(sessionStorage.getItem("feedo_unlocked")==="1"){ document.getElementById
     <div class="field"><label>每日桶數記錄？（選「是」會出現在煮茶頁）</label>
       <div class="seg" id="it-tea"><button data-v="yes">是</button><button class="on" data-v="no">否</button></div></div>
     <div style="display:flex;gap:10px">
-      <div class="field" style="flex:1"><label>目前庫存</label><input class="txt-input" id="it-bal" type="number" inputmode="decimal" placeholder="0"></div>
+      <div class="field" style="flex:1"><label>目前庫存<small style="color:var(--grey);font-weight:400"> · 改這裡會記一筆盤點調整</small></label><input class="txt-input" id="it-bal" type="number" inputmode="decimal" placeholder="0"></div>
       <div class="field" style="flex:1"><label>安全庫存</label><input class="txt-input" id="it-safe" type="number" inputmode="decimal" placeholder="0"></div>
     </div>
     <div style="display:flex;gap:10px">
       <div class="field" style="flex:1"><label>進貨成本</label><input class="txt-input" id="it-cost" type="number" inputmode="decimal" placeholder="0"></div>
-      <div class="field" style="flex:1"><label>一天約用量</label><input class="txt-input" id="it-avg" type="number" inputmode="decimal" placeholder="0"></div>
+      <div class="field" style="flex:1"><label>一天約用量<small style="color:var(--grey);font-weight:400"> · 手填預估</small></label><input class="txt-input" id="it-avg" type="number" inputmode="decimal" placeholder="0">
+        <div id="it-avg-hint" style="font-size:10px;color:var(--ok);margin-top:4px;display:none"></div></div>
     </div>
     <div class="field"><label>供應商</label><input class="txt-input" id="it-supplier" placeholder="例：松霖"></div>
     <button class="btn-primary" onclick="saveItemEdit()" id="it-save-btn">新增</button>
@@ -321,14 +323,50 @@ try{ if(sessionStorage.getItem("feedo_unlocked")==="1"){ document.getElementById
   </div>
 </div>
 
-<!-- 盤點 modal -->
-<div class="modal-overlay hidden" id="modal-stocktake">
+<!-- 到貨 modal -->
+<div class="modal-overlay hidden" id="modal-receive">
   <div class="modal-sheet">
-    <div class="modal-head"><span class="serif">月度盤點</span><button onclick="closeModal('stocktake')">✕</button></div>
-    <div class="modal-note">實際數一次庫存，填現況，系統算出跟理論值的差（耗損），確認後校正。</div>
-    <div id="stocktake-list"></div>
-    <button class="btn-primary" style="margin-top:10px" onclick="submitStocktake()">確認盤點並校正庫存</button>
+    <div class="modal-head"><span class="serif">確認到貨</span><button onclick="closeModal('receive')">✕</button></div>
+    <div class="modal-note" id="rc-info"></div>
+    <div class="field">
+      <label>實際到貨數量（<span id="rc-unit"></span>）</label>
+      <input class="txt-input" id="rc-qty" type="number" inputmode="decimal" placeholder="0">
+    </div>
+    <div class="field">
+      <label>這批多少錢<small style="color:var(--grey);font-weight:400"> · 選填，月結還不知道價格就留空</small></label>
+      <input class="txt-input" id="rc-amt" type="number" inputmode="decimal" placeholder="出貨單上的金額">
+      <div style="font-size:11px;color:var(--grey);margin-top:5px;line-height:1.5" id="rc-cost-hint"></div>
+    </div>
+    <button class="btn-primary" onclick="submitReceive()">確認入庫</button>
   </div>
+</div>
+
+<!-- 微碧報表匯入 modal -->
+<div class="modal-overlay hidden" id="modal-pos">
+  <div class="modal-sheet">
+    <div class="modal-head"><span class="serif">匯入微碧報表</span><button onclick="closeModal('pos')">✕</button></div>
+    <div class="modal-note">
+      iPad APP 匯出後會寄三個 CSV，<b>選「訂單列表」那一個</b>。<br>
+      營運總表和交易列表沒有品項明細，用不了。
+    </div>
+    <div class="field">
+      <label>訂單列表 CSV</label>
+      <input class="txt-input" type="file" id="pos-file" accept=".csv,text/csv" onchange="posPickFile(this)">
+    </div>
+    <div id="pos-result"></div>
+    <button class="btn-primary" id="pos-import-btn" style="display:none" onclick="submitPosImport()">確認匯入</button>
+  </div>
+</div>
+
+<!-- 盤點 modal -->
+<div class="screen hidden" id="scr-stocktake">
+  <div class="sec-eyebrow">月度盤點</div>
+  <div style="font-size:12px;color:var(--grey);line-height:1.6;margin-bottom:12px">
+    實際數一次庫存填進去，系統算出跟帳面的差額並寫成一筆調整。<br>
+    茶葉填「幾包」就好（一包 100g），不用秤到公克。只填你數過的，沒填的不動。
+  </div>
+  <div class="card" id="stocktake-list"></div>
+  <div class="scroll-hint"></div>
 </div>
 
 <!-- 損耗 modal -->
@@ -383,8 +421,9 @@ try{ if(sessionStorage.getItem("feedo_unlocked")==="1"){ document.getElementById
   <div class="sec-eyebrow">損益 · <span id="rep-month"></span></div>
   <div class="pl-card">
     <div class="pl-row"><span class="k">營收（每日累計）</span><span class="v" id="pl-rev">—</span></div>
-    <div class="pl-row"><span class="k">物料成本</span><span class="v" id="pl-cogs">—</span></div>
+    <div class="pl-row"><span class="k">物料成本<small style="color:var(--grey);display:block;font-size:10px;letter-spacing:.5px">當月實際耗用的料</small></span><span class="v" id="pl-cogs">—</span></div>
     <div class="pl-row"><span class="k">營業開銷</span><span class="v" id="pl-opex">—</span></div>
+    <div class="pl-row" style="opacity:.6"><span class="k">（本月付給廠商<small style="color:var(--grey);display:block;font-size:10px;letter-spacing:.5px">現金流，不是成本</small></span><span class="v" id="pl-paid">—</span></div>
     <div class="pl-row profit"><span class="k">毛利</span><span class="v" id="pl-profit">—</span></div>
   </div>
   <div style="margin-bottom:14px"><button class="mini-btn" onclick="exportCSV()">匯出 CSV 給記帳士</button></div>
@@ -415,6 +454,9 @@ try{ if(sessionStorage.getItem("feedo_unlocked")==="1"){ document.getElementById
     <div class="stat"><div class="v serif" id="rev-days">0</div><div class="k">已記天數</div></div>
     <div class="stat"><div class="v serif" id="rev-avg">$0</div><div class="k">日均</div></div>
   </div>
+  <div style="display:flex;gap:8px;margin-bottom:12px">
+    <button class="mini-btn" style="flex:1;border-color:var(--ink);color:var(--ink)" onclick="openPosImport()">⬆ 匯入微碧報表</button>
+  </div>
   <div class="sec-eyebrow">每日營收 · 打烊在煮茶頁填</div>
   <div class="card" id="rev-list"></div>
   <div class="scroll-hint"></div>
@@ -423,6 +465,7 @@ try{ if(sessionStorage.getItem("feedo_unlocked")==="1"){ document.getElementById
 <div class="submit-bar hidden" id="submit-brew"><button class="btn-primary" onclick="submitBrew()">登記今日煮茶</button></div>
 <div class="submit-bar hidden" id="submit-log"><button class="btn-primary" id="log-submit-btn" onclick="submitLog()">記錄用量</button></div>
 <div class="submit-bar hidden" id="submit-expense"><button class="btn-primary" onclick="submitExpense()">記錄開銷</button></div>
+<div class="submit-bar hidden" id="submit-stocktake"><button class="btn-primary" onclick="submitStocktake()">確認盤點並校正庫存</button></div>
 
 <div class="toast" id="toast"></div>
 
@@ -431,70 +474,155 @@ try{ if(sessionStorage.getItem("feedo_unlocked")==="1"){ document.getElementById
 <script>
 const SHOP_NAME="FEEDO MUSEUM";
 const PACK_G=100;
-// ====== 雲端後端 ======
-const API_URL="https://script.google.com/macros/s/AKfycbzjBAxJ71iM5qx7ZBny0Hc53NDmsUiwqRgp-O2dtfBXaDO1mBNER6a2IEqcJnRnuba6HA/exec";
-let cloudReady=false;
-async function cloudLoad(){
+// ====== 後端：Supabase（與 feedo-claim 同一個專案）======
+const SUPABASE_URL  = "https://gezzdwwqxysesxoqhabe.supabase.co";
+const SUPABASE_ANON = "sb_publishable_Gm4HimK886h8IX0lHdea8A_Y2L3J3G3";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+let dataReady = false;   // 有沒有成功載到雲端資料。false 時一律不准寫入
+let me        = null;    // {name, role}
+let serverToday = null;
+
+// 用裝置本地日期，不要用 toISOString()（那是 UTC，台灣早上 8 點前會算成前一天）
+function localDate(d){
+  d = d || new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+
+const uuid = () => (crypto.randomUUID ? crypto.randomUUID()
+  : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+      const r = Math.random()*16|0; return (c==="x" ? r : (r&0x3|0x8)).toString(16); }));
+
+/* ---------- 離線佇列 ----------
+   所有寫入先進佇列再送。每筆都帶自己的 uuid，後端 on conflict do nothing，
+   所以重送幾次都只會有一筆。送不出去就留在 localStorage，下次連上自動補送。
+   （舊版是 fire-and-forget：網路一斷這筆就永遠消失，但畫面已經扣了庫存。）*/
+const QKEY = "feedo_erp_queue";
+let queue = [];
+try { queue = JSON.parse(localStorage.getItem(QKEY) || "[]"); } catch(e) { queue = []; }
+function saveQueue(){ try { localStorage.setItem(QKEY, JSON.stringify(queue)); } catch(e) {} }
+
+function queueBadge(){
+  const el = document.getElementById("sync-badge");
+  if(!el) return;
+  if(queue.length){
+    el.textContent = `⚠ ${queue.length} 筆還沒同步到雲端，保持網路開啟`;
+    el.style.display = "block";
+  } else el.style.display = "none";
+}
+
+async function callRpc(fn, args){
+  const { data, error } = await sb.rpc(fn, args);
+  if(error) throw error;
+  return data;
+}
+
+// 後端明確拒絕（權限/驗證/資料錯）就丟掉，否則這筆會永遠卡住整條佇列。
+// 注意 PostgREST 自己的錯誤碼是 PGRST###，不是 SQLSTATE：
+//   PGRST202/203/204 = function/欄位找不到 → 再試幾次也不會變出來，丟掉
+//   PGRST301         = token 過期 → supabase-js 會自己換新的，要留著重試
+function isPermanent(err){
+  const c = String((err && err.code) || "");
+  return ["28000","42501","22007","22023","23503","23514","23505","42883",
+          "PGRST202","PGRST203","PGRST204"].includes(c);
+}
+
+let flushing = false;
+async function flush(){
+  if(flushing) return queue.length === 0;
+  flushing = true;
+  let dropped = false;
   try{
-    const r=await fetch(API_URL);
-    const d=await r.json();
-    if(d && d.items && d.items.length){
-      items=d.items.map(it=>({
-        code:it.code,name:it.name,cat:it.cat,unit:it.unit,
-        safe:Number(it.safe),bal:Number(it.bal),cost:Number(it.cost),
-        supplier:it.supplier,tea:it.tea===true||it.tea==="TRUE"||it.tea==="true",
-        avgPerDay:Number(it.avgPerDay),note:it.note||""
-      }));
-      if(d.exp) expenses=d.exp.map(e=>({date:fmtDate_(e.date),cat:e.cat,amt:Number(e.amt),payee:e.payee,method:e.method,note:e.note,paid:true}));
-      if(d.rev) dailyRevenue=d.rev.map(r=>({date:fmtDate_(r.date),amt:Number(r.amt)}));
-      if(d.ordered) orderedCodes=d.ordered.filter(o=>o.status==="等貨中").map(o=>o.code);
-      cloudReady=true;
+    while(queue.length){
+      const job = queue[0];
+      try{
+        await callRpc(job.fn, job.args);
+      }catch(err){
+        if(isPermanent(err)){
+          console.warn("後端拒絕，丟棄這筆", job, err);
+          toast("⚠ 有一筆被後端拒絕：" + (err.message || err.code));
+          queue.shift(); saveQueue(); dropped = true; continue;
+        }
+        queueBadge();
+        return false;               // 網路問題，留著下次再送
+      }
+      queue.shift(); saveQueue();
     }
-  }catch(err){ console.log("雲端讀取失敗，用本機資料",err); }
+  } finally { flushing = false; }
+  queueBadge();
+  // 丟掉的那筆本地已經樂觀改過畫面了，一定要把雲端真相拉回來蓋掉，
+  // 不然店員看到的庫存會比實際少（或多）。
+  if(dropped && dataReady) resyncIfClean();
+  return true;
 }
-function fmtDate_(v){
-  if(!v) return "";
-  if(typeof v==="string") return v.slice(0,10);
-  try{const d=new Date(v);return d.toISOString().slice(0,10);}catch(e){return String(v).slice(0,10);}
+
+/* 排入佇列並立刻嘗試送出。回傳 true = 已確實寫進雲端 */
+async function push(fn, args){
+  queue.push({ fn, args }); saveQueue(); queueBadge();
+  return await flush();
 }
-async function cloudPush(payload){
-  if(!API_URL) return;
-  try{
-    await fetch(API_URL,{method:"POST",body:JSON.stringify(payload)});
-  }catch(err){ toast("⚠ 雲端同步失敗，稍後再試"); }
+
+/* 沒載到雲端資料就不准寫。
+   舊版連不上時會退回寫死的示範庫存，店員照樣操作 → 扣的是假數字。*/
+const isManager = () => !!me && (me.role === "manager" || me.role === "owner");
+
+/* 依角色調整介面。
+   這只是 UX —— 真正的線畫在後端（erp_require_manager），
+   店員把按鈕叫出來也一樣會被 RPC 擋掉。*/
+function applyRole(){
+  const mgr = isManager();
+  $("#mode-money").style.display = mgr ? "" : "none";
+  $("#st-val-box").style.display = mgr ? "" : "none";   // 庫存總值 = 成本資訊
+  $("#btn-new-item").parentElement.style.display = mgr ? "" : "none";
+  $("#role-tag").textContent = mgr ? "店長" : "店員";
+  if(!mgr && mode === "money") setMode("stock");
 }
-let items=[
-  {code:"TEA-01",name:"台東紅烏龍",cat:"茶葉",unit:"g",safe:4000,bal:4000,cost:0.63,supplier:"松霖",tea:true,avgPerDay:810},
-  {code:"TEA-02",name:"四季春烏龍",cat:"茶葉",unit:"g",safe:4000,bal:4000,cost:0,supplier:"松霖",tea:true,avgPerDay:775},
-  {code:"TEA-03",name:"小葉紅茶",cat:"茶葉",unit:"g",safe:3500,bal:3500,cost:0.67,supplier:"松霖",tea:true,avgPerDay:669},
-  {code:"TEA-04",name:"茉莉綠茶",cat:"茶葉",unit:"g",safe:2500,bal:2500,cost:0.58,supplier:"松霖",tea:true,avgPerDay:496},
-  {code:"TEA-05",name:"台東紅烏龍鮮奶茶",cat:"茶葉",unit:"g",safe:2500,bal:2500,cost:0.63,supplier:"松霖",tea:true,avgPerDay:450},
-  {code:"TEA-06",name:"小葉鮮奶茶",cat:"茶葉",unit:"g",safe:2500,bal:2500,cost:0.67,supplier:"松霖",tea:true,avgPerDay:438},
-  {code:"TEA-07",name:"伯爵茶",cat:"茶葉",unit:"g",safe:2500,bal:2500,cost:0.23,supplier:"松霖",tea:true,avgPerDay:423},
-  {code:"TEA-08",name:"凍頂烏龍",cat:"茶葉",unit:"g",safe:2000,bal:2000,cost:0.63,supplier:"松霖",tea:true,avgPerDay:312},
-  {code:"TEA-09",name:"青心烏龍",cat:"茶葉",unit:"g",safe:2000,bal:2000,cost:1.42,supplier:"松霖",tea:true,avgPerDay:298},
-  {code:"TEA-10",name:"炭焙烏龍",cat:"茶葉",unit:"g",safe:1500,bal:1500,cost:1.58,supplier:"松霖",tea:true,avgPerDay:227},
-  {code:"PKG-01",name:"16oz 紙杯",cat:"包材",unit:"個",safe:2000,bal:2000,cost:1.45,supplier:"—",avgPerDay:320},
-  {code:"PKG-02",name:"封膜",cat:"包材",unit:"個",safe:2000,bal:2000,cost:0,supplier:"永員",avgPerDay:320},
-  {code:"PKG-03",name:"吸管",cat:"包材",unit:"箱",safe:2,bal:2,cost:0,supplier:"永員",avgPerDay:0.1},
-  {code:"PKG-04",name:"塑膠袋",cat:"包材",unit:"組",safe:5,bal:5,cost:0,supplier:"—",avgPerDay:1},
-  {code:"PKG-05",name:"杯架",cat:"包材",unit:"個",safe:200,bal:200,cost:0,supplier:"—",avgPerDay:100},
-  {code:"PKG-06",name:"蔗糖液",cat:"糖類",unit:"箱",safe:2,bal:2,cost:770,supplier:"開南",avgPerDay:0.3},
-];
-const EXP_CATS=["房租","水電","人事薪資","廠商貨款","行銷","設備","稅金","雜支"];
-let expenses=[
-  {date:"2026-06-01",cat:"房租",amt:10000,payee:"房東",method:"轉帳",note:"6月",paid:true},
-  {date:"2026-06-01",cat:"雜支",amt:2000,payee:"江爸",method:"現金",note:"收垃圾清潔費",paid:true},
-  {date:"2026-07-01",cat:"廠商貨款",amt:25520,payee:"松霖",method:"轉帳",note:"6月茶葉月結",paid:true},
-];
-let pendingPays=[]; // {payee, amt, items, supplier}
-let orderedCodes=[]; // 已叫貨、等貨中的品項代碼
-let monthRevenue=0;
-let dailyRevenue=[
-  {date:"2026-06-26",amt:20600},{date:"2026-06-27",amt:21900},{date:"2026-06-28",amt:23800},
-  {date:"2026-06-29",amt:25100},{date:"2026-06-30",amt:27200},
-];
-let brewToday={}; // code -> 桶數(總數，不分時段)
+
+function canWrite(){
+  if(!dataReady){ toast("⚠ 尚未連上雲端，現在不能記錄"); return false; }
+  return true;
+}
+
+function mapItem(v){
+  return {
+    code: v.code, name: v.name, cat: v.cat, unit: v.unit,
+    safe: Number(v.safe_qty), bal: Number(v.bal), cost: Number(v.cost) || 0,
+    supplier: v.supplier || "—", tea: !!v.is_tea,
+    packG: Number(v.pack_g) || PACK_G,
+    avgPerDay: Number(v.avg_per_day), avgIsActual: !!v.avg_is_actual,
+    avgManual: Number(v.avg_per_day_manual),
+    onOrder: !!v.on_order, note: v.note || "", sortOrder: v.sort_order || 0
+  };
+}
+
+async function cloudLoad(){
+  const d = await callRpc("erp_bootstrap", { p_months: 3 });
+  me          = d.me || null;
+  serverToday = d.today;
+  items       = (d.items || []).map(mapItem);
+  expenses    = (d.expenses || []).map(e => ({
+                  id: e.id, date: String(e.spent_on).slice(0,10), cat: e.cat,
+                  amt: Number(e.amount), payee: e.payee, method: e.method,
+                  note: e.note || "", paid: e.paid !== false }));
+  dailyRevenue= (d.revenue || []).map(r => ({
+                  date: String(r.revenue_on).slice(0,10), amt: Number(r.amount) }));
+  pendingOrders = d.orders || [];
+  orderedCodes  = pendingOrders.map(o => o.item_code);
+  brewedToday   = Number(d.brewed_today) || 0;
+  brewToday     = loadBrewDraft();     // 上次沒送出去的點記撿回來
+  dataReady     = true;
+}
+
+let items = [];
+const EXP_CATS = ["房租","水電","人事薪資","廠商貨款","行銷","設備","稅金","雜支"];
+let expenses = [];
+let pendingPays = [];   // {payee, amt, items, supplier}
+let orderedCodes = [];  // 已叫貨、等貨中的品項代碼
+let dailyRevenue = [];
+let brewToday={};        // code -> 今天已點的桶數（尚未送出的草稿）
+let brewedToday=0;       // 今天「已經寫進雲端」的煮茶量(g)，待辦卡片用
+let pendingOrders=[];    // 等貨中的叫貨單（含 qty/unit/ordered_on）
+let monthReport=null;    // erp_month_report 的結果，成本要用它算出來的 cogs
 let brewDate=null; // null=今天；否則為補登日期 yyyy-mm-dd
 
 const $=s=>document.querySelector(s);
@@ -507,7 +635,8 @@ function changeReportMonth(delta){
   const nm=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
   if(nm>curMonth())return; // 不能看未來
   viewMonth=nm;
-  renderReport();renderRevenue();
+  monthReport=null;
+  renderReport();renderRevenue();loadMonthReport();
 }
 function fmtMonthLabel(ym){
   const [y,m]=ym.split("-");
@@ -520,42 +649,131 @@ function daysLeft(it){if(!it.avgPerDay)return "—";return Math.floor(it.bal/it.
 
 /* 煮茶 */
 function renderSegTabs(){/* 時段已移除，保留空函式避免其他呼叫出錯 */}
+/* 煮茶：煮好一桶就按一下，不是打烊後回想一整天。
+   點下去先記在本機（localStorage，關掉也不會掉），停手 8 秒自動送出。
+   送出前都可以按 ↶ 收回，所以帳上不會出現「記錯再沖銷」的髒資料。 */
+const BREW_DRAFT="feedo_brew_draft";
+const FLUSH_MS=8000;
+let brewTimer=null;
+
+function loadBrewDraft(){
+  try{
+    const d=JSON.parse(localStorage.getItem(BREW_DRAFT)||"null");
+    if(d && d.date===localDate()) return d.counts||{};   // 昨天的草稿不要撿回來
+  }catch(e){}
+  return {};
+}
+function saveBrewDraft(){
+  try{
+    const any=Object.values(brewToday).some(v=>v>0);
+    if(any) localStorage.setItem(BREW_DRAFT, JSON.stringify({date:localDate(),counts:brewToday}));
+    else localStorage.removeItem(BREW_DRAFT);
+  }catch(e){}
+}
+
+function tapBrew(code,n){
+  if(!canWrite())return;
+  const t=items.find(i=>i.code===code); if(!t)return;
+  brewToday[code]=Math.round(((brewToday[code]||0)+n)*2)/2;
+  t.bal=Math.max(0,t.bal-n*t.packG);            // 畫面立刻反映，可撐天數當場變
+  saveBrewDraft(); renderBrew(); scheduleFlush();
+}
+function undoBrew(code){
+  const cur=brewToday[code]||0; if(cur<=0)return;
+  const n=cur>=1?1:0.5;
+  const t=items.find(i=>i.code===code);
+  brewToday[code]=Math.round((cur-n)*2)/2;
+  if(t) t.bal+=n*t.packG;
+  saveBrewDraft(); renderBrew(); scheduleFlush();
+}
+function scheduleFlush(){
+  clearTimeout(brewTimer);
+  brewTimer=setTimeout(flushBrew, FLUSH_MS);
+  updateBrewPending();
+}
+
 function renderBrew(){
-  const box=$("#brew-list");box.innerHTML="";
+  const box=$("#brew-list"); if(!box) return;
+  box.innerHTML="";
   const THRESHOLD=6;
   teas().forEach(t=>{
-    if(brewToday[t.code]==null)brewToday[t.code]=0;
-    const val=brewToday[t.code]||0;
+    const n=brewToday[t.code]||0;
     const d=daysLeft(t);
     const low = d!=="—" && d<=THRESHOLD;
-    const dayTag = d==="—" ? "" :
-      `<span class="day-tag ${low?'low':''}">還夠 ${d} 天${low?' · 該叫貨':''}</span>`;
     const row=document.createElement("div");row.className="tea-row";
-    row.innerHTML=`<div><div class="tea-name">${t.name}</div>
-      <div class="tea-sub">庫存 ${t.bal}g · 約 ${Math.floor(t.bal/PACK_G)} 桶　${dayTag}</div></div>
-      <div class="stepper"><button onclick="stepBrew('${t.code}',-0.5)">–</button>
-      <input class="val-input" id="bv-${t.code}" type="number" inputmode="decimal" value="${val}" onchange="setBrew('${t.code}',this.value)" onfocus="this.select()">
-      <button onclick="stepBrew('${t.code}',0.5)">+</button><span class="unit">桶</span></div>`;
+    row.innerHTML=
+      `<div style="flex:1;min-width:0">
+         <div class="tea-name">${t.name}</div>
+         <div class="tea-sub"${low?' style="color:var(--alert);font-weight:600"':''}>還夠 ${d} 天${low?' · 該叫貨':''}</div>
+       </div>
+       <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+         <span class="brew-count ${n?'':'zero'}">${n||0}</span>
+         ${n?`<button class="brew-undo" onclick="undoBrew('${t.code}')" title="收回">↶</button>`:''}
+         <button class="brew-btn brew-half" onclick="tapBrew('${t.code}',0.5)">半桶</button>
+         <button class="brew-btn" onclick="tapBrew('${t.code}',1)">＋1 桶</button>
+       </div>`;
     box.appendChild(row);
   });
+  // 明日預估
   let total=0,parts=[];
-  teas().forEach(t=>{const b=Math.round(t.avgPerDay/PACK_G);total+=b;if(b>0)parts.push(`${t.name} ${b}`);});
-  $("#fc-total").textContent=total;$("#fc-detail").textContent=parts.join("・")+" 桶";
+  teas().forEach(t=>{const b=Math.round(t.avgPerDay/t.packG);total+=b;if(b>0)parts.push(`${t.name} ${b}`);});
+  $("#fc-total").textContent=total;
+  const basis=$("#fc-basis");
+  if(basis){
+    const actual=teas().some(t=>t.avgIsActual);
+    basis.innerHTML=(actual?"依近 28 天實際耗用":"依手填預估用量")+"<br>明天建議備 <b>"+(parts.join("・")+" 桶")+"</b>";
+  }
+  updateBrewPending();
+  renderTodo();
 }
-function stepBrew(c,d){
-  brewToday[c]=Math.max(0,Math.round(((brewToday[c]||0)+d)*2)/2);
-  $("#bv-"+c).value=brewToday[c];
-  updateLogReminder();
+
+function updateBrewPending(){
+  const n=Object.values(brewToday).reduce((a,b)=>a+(b||0),0);
+  const el=$("#brew-pending");
+  const rev=parseFloat(($("#today-rev")||{}).value)||0;
+  if(el) el.textContent = n ? `今天已記 ${n} 桶 · 停手幾秒後自動存檔` : "";
+  const btn=$("#submit-brew") && $("#submit-brew").querySelector("button");
+  if(btn){
+    if(n||rev){ btn.textContent=n?`立即存檔（${n} 桶）`:"存今日營收"; btn.disabled=false; btn.style.opacity="1"; }
+    else { btn.textContent="今天沒有待存的紀錄"; btn.disabled=true; btn.style.opacity=".35"; }
+  }
 }
-function setBrew(c,v){
-  let n=parseFloat(v);if(isNaN(n)||n<0)n=0;
-  brewToday[c]=Math.round(n*2)/2; // 對齊 0.5
-  $("#bv-"+c).value=brewToday[c];
-  updateLogReminder();
+
+/* 真正寫進雲端。停手 8 秒自動觸發，也可以手動按「立即存檔」。 */
+async function flushBrew(){
+  clearTimeout(brewTimer);
+  const rows=[];
+  teas().forEach(t=>{
+    const b=brewToday[t.code]||0;
+    if(b>0) rows.push({id:uuid(),code:t.code,buckets:b});
+  });
+  const rev=parseFloat($("#today-rev").value);
+  if(!rows.length && !(rev>0)) return;
+  if(!canWrite())return;
+
+  const recDate=brewDate||localDate();
+  if(rev>0){
+    const ex=dailyRevenue.find(r=>r.date===recDate);
+    if(ex)ex.amt=rev; else dailyRevenue.push({date:recDate,amt:rev});
+    $("#today-rev").value="";
+  }
+  const n=rows.reduce((a,r)=>a+r.buckets,0);
+  brewToday={}; saveBrewDraft();
+  const wasBack=!!brewDate;
+  brewDate=null; $("#brew-date").value=""; onBrewDateChange();
+
+  const sent=await push("erp_log_brew",{p_rows:rows,p_date:recDate,p_revenue:rev>0?rev:null});
+  brewedToday += n*100;                          // 待辦卡片用，粗估即可
+  renderBrew();renderInv();renderOrder();refreshSummary();
+  toast((wasBack?`已補登 ${recDate.slice(5)}：`:"已存檔：")+
+        (n?`${n} 桶`:"")+(rev>0?`　營收 ${money(rev)}`:"")+(sent?"":"　⚠ 待同步"));
+  if(sent)resyncIfClean();
 }
+const submitBrew=flushBrew;   // 底部按鈕沿用同一條路
+
 function onBrewDateChange(){
   const v=$("#brew-date").value;
-  const today=new Date().toISOString().slice(0,10);
+  const today=localDate();
   const bar=$("#brew-date-bar");
   if(!v||v===today){
     brewDate=null;
@@ -568,17 +786,29 @@ function onBrewDateChange(){
     bar.classList.add("back");
   }
 }
-function updateLogReminder(){
-  const anyPending=teas().some(t=>(brewToday[t.code]||0)>0);
-  const btn=$("#submit-brew").querySelector("button");
-  if(anyPending){
-    btn.classList.add("pending-log");
-    btn.textContent="⚠ 記得按此登記，庫存才會扣";
-  } else {
-    btn.classList.remove("pending-log");
-    btn.textContent="登記今日煮茶";
-  }
+function updateLogReminder(){ updateBrewPending(); }
+
+/* 打開就知道今天還有什麼沒做 */
+function renderTodo(){
+  const box=$("#todo-card"); if(!box) return;
+  const li=[];
+  const today=localDate();
+  const pending=Object.values(brewToday).reduce((a,b)=>a+(b||0),0);
+  if(!brewedToday && !pending) li.push("今天還沒記任何煮茶");
+  if(isManager() && !dailyRevenue.some(r=>r.date===today)) li.push("今天還沒記營收");
+  const low=items.filter(i=>i.bal<=i.safe && !orderedCodes.includes(i.code));
+  if(low.length) li.push(`<b>${low.length}</b> 個品項該叫貨了　<button class="go" onclick="nav('order')">去看</button>`);
+  const stale=pendingOrders.filter(o=>{
+    const d=(new Date(today)-new Date(String(o.ordered_on).slice(0,10)))/86400000;
+    return d>=5;
+  });
+  if(stale.length) li.push(`<b>${stale.length}</b> 筆叫貨等超過 5 天還沒到`);
+
+  box.innerHTML = li.length
+    ? `<div class="todo"><div class="t">今天還沒做</div><ul>${li.map(x=>`<li>・${x}</li>`).join("")}</ul></div>`
+    : "";
 }
+
 const PDF_SEGS=["開早","中午","下午","加煮"];
 let pdfSeg="開早";
 let pdfPlan={}; // code -> {開早,中午,下午}
@@ -686,35 +916,6 @@ function generateBrewPDF(){
   closeModal('pdf');
   toast("已產生明日煮茶單，可列印給店員");
 }
-function submitBrew(){
-  let any=false,lines=[];
-  const brewRows=[];
-  teas().forEach(t=>{
-    const b=brewToday[t.code]||0;
-    if(b>0){
-      t.bal=Math.max(0,t.bal-b*PACK_G);any=true;lines.push(`${t.name}${b}桶`);
-      brewRows.push({code:t.code,name:t.name,segment:"全日",buckets:b,grams:b*PACK_G});
-    }
-  });
-  const rev=parseFloat($("#today-rev").value);
-  const recDate=brewDate||new Date().toISOString().slice(0,10);
-  let revMsg="";
-  if(rev>0){
-    const ex=dailyRevenue.find(r=>r.date===recDate);
-    if(ex)ex.amt=rev;else dailyRevenue.push({date:recDate,amt:rev});
-    revMsg=`　營收 ${money(rev)}`;
-    $("#today-rev").value="";
-    monthRevenue=dailyRevenue.filter(r=>r.date.startsWith(curMonth())).reduce((s,r)=>s+r.amt,0);
-  }
-  if(!any&&!rev){toast("還沒記任何桶數或營收");return;}
-  cloudPush({action:"brew",rows:JSON.stringify(brewRows),revenue:rev>0?rev:0,date:recDate});
-  const wasBack=!!brewDate;
-  brewToday={};brewDate=null;
-  $("#brew-date").value="";onBrewDateChange();
-  renderBrew();renderInv();renderOrder();refreshSummary();renderReport();updateLogReminder();
-  toast((wasBack?`已補登 ${recDate.slice(5)}：`:"已登記：")+(lines.join("、")||"—")+revMsg);
-}
-
 /* 記一筆物料 */
 let logState={type:"用量",code:null};
 function renderLog(){
@@ -733,16 +934,20 @@ $("#log-type").addEventListener("click",e=>{if(e.target.dataset.t){logState.type
   [...$("#log-type").children].forEach(b=>b.classList.toggle("on",b.dataset.t===logState.type));
   $("#log-submit-btn").textContent=logState.type==="進貨"?"記錄進貨":"記錄用量";
   $("#log-unit").textContent="";renderLog();}});
-function submitLog(){
+async function submitLog(){
+  if(!canWrite())return;
   const q=parseFloat($("#log-qty").value);
   if(!logState.code){toast("先選品項");return;}if(!q||q<=0){toast("填數量");return;}
   const it=items.find(i=>i.code===logState.code);
-  it.bal=Math.max(0,it.bal+(logState.type==="進貨"?q:-q));
-  cloudPush({action:"move",code:it.code,name:it.name,type:logState.type,qty:q,unit:it.unit});
-  // 進貨=貨到了，解除等貨中
-  if(logState.type==="進貨") orderedCodes=orderedCodes.filter(c=>c!==it.code);
+  const receiving=logState.type==="進貨";
+  it.bal=Math.max(0,it.bal+(receiving?q:-q));
+  const sent=await push("erp_log_move",{
+    p_id:uuid(),p_code:it.code,p_kind:receiving?"receive":"use",p_qty:q,p_note:"",p_date:localDate()});
+  // 進貨 = 貨到了，解除等貨中（後端也會同步結掉那張單）
+  if(receiving) orderedCodes=orderedCodes.filter(c=>c!==it.code);
   $("#log-qty").value="";renderInv();renderOrder();refreshSummary();
-  toast(`${it.name} ${logState.type} ${q}${it.unit}`);
+  toast(`${it.name} ${logState.type} ${q}${it.unit}`+(sent?"":"　⚠ 待同步"));
+  if(sent)resyncIfClean();
 }
 
 /* 叫貨 */
@@ -771,8 +976,10 @@ function renderOrder(){
     Object.entries(g).forEach(([sup,list])=>{
       const d=document.createElement("div");d.className="supplier-grp";let rows="";
       list.forEach(i=>{const o=orderQty(i);
+        // 茶葉一律用「包」顯示，跟庫存頁和盤點頁一致（叫貨量本來就是「斤」）
+        const u=i.tea?"包":i.unit, b=i.tea?Math.round(i.bal/i.packG*10)/10:i.bal, sf=i.tea?Math.round(i.safe/i.packG):i.safe;
         rows+=`<div class="order-row"><div class="info"><div class="n">${i.name}</div>
-        <div class="s">結餘 ${i.bal}${i.unit} · 安全 ${i.safe}${i.unit}</div></div>
+        <div class="s">剩 ${b}${u} · 安全 ${sf}${u}</div></div>
         <div class="qty">${o.qty}<small> ${o.unit}</small></div></div>`;});
       d.innerHTML=`<div class="supplier-hd"><span class="nm">${sup}</span>
         <button class="copy-btn" onclick="copyOrder('${sup}')">複製並標記已叫</button></div>${rows}`;
@@ -789,33 +996,86 @@ function renderOrder(){
     waiting.forEach(i=>{
       const row=document.createElement("div");row.className="order-row";
       row.innerHTML=`<div class="info"><div class="n">${i.name} <span style="font-size:10px;color:var(--warn)">等貨中</span></div>
-        <div class="s">結餘 ${i.bal}${i.unit} · 已叫 ${i.supplier}</div></div>
-        <button class="copy-btn" style="border-color:var(--grey);color:var(--grey)" onclick="cancelOrdered('${i.code}')">取消標記</button>`;
+        <div class="s">已叫 ${(()=>{const o=pendingOrders.find(x=>x.item_code===i.code);return o?`${o.qty}${o.unit} · ${i.supplier}`:i.supplier;})()}</div></div>
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+          <button class="copy-btn" style="border-color:var(--ok);color:var(--ok)" onclick="openReceive('${i.code}')">✓ 到貨</button>
+          <button class="copy-btn" style="border-color:var(--grey);color:var(--grey);font-size:10px;padding:4px 8px" onclick="cancelOrdered('${i.code}')">取消</button>
+        </div>`;
       wc.appendChild(row);
     });
     body.appendChild(wc);
   }
 }
-function copyOrder(sup){
+async function copyOrder(sup){
   const list=items.filter(i=>i.bal<=i.safe&&i.supplier===sup&&!orderedCodes.includes(i.code));
   if(!list.length){toast("這家沒有要叫的品項");return;}
   let msg=`${sup} 您好，${SHOP_NAME} 叫貨：\n`,est=0;
-  list.forEach(i=>{const o=orderQty(i);msg+=`・${i.name} ${o.qty}${o.unit}\n`;est+=o.grams*(i.cost||0);});
+  const rows=[];
+  list.forEach(i=>{
+    const o=orderQty(i);
+    msg+=`・${i.name} ${o.qty}${o.unit}\n`;
+    est+=o.grams*(i.cost||0);
+    rows.push({id:uuid(),code:i.code,qty:o.qty,unit:o.unit,supplier:sup});
+  });
   msg+="麻煩了，謝謝！";
   if(navigator.clipboard)navigator.clipboard.writeText(msg);
-  // 標記已叫
-  const rows=list.map(i=>({code:i.code,name:i.name,supplier:sup}));
+  if(!canWrite()){toast("已複製訊息，但未連上雲端，沒有標記已叫");return;}
   list.forEach(i=>{if(!orderedCodes.includes(i.code))orderedCodes.push(i.code);});
-  cloudPush({action:"markOrdered",rows:JSON.stringify(rows)});
+  const sent=await push("erp_place_orders",{p_rows:rows});
   if(!pendingPays.find(p=>p.payee===sup)) pendingPays.push({payee:sup,amt:Math.round(est),items:list.map(i=>i.name).join("、"),supplier:true});
   renderPay();renderOrder();
-  toast("已複製並標記已叫，可貼 LINE 給"+sup);
+  toast("已複製並標記已叫，可貼 LINE 給"+sup+(sent?"":"　⚠ 待同步"));
 }
-function cancelOrdered(code){
+async function cancelOrdered(code){
+  if(!canWrite())return;
   orderedCodes=orderedCodes.filter(c=>c!==code);
-  cloudPush({action:"clearOrdered",code});
+  await push("erp_cancel_order",{p_code:code});
   renderOrder();
   toast("已取消「等貨中」標記");
+}
+
+/* 到貨：叫貨頁直接按一下就入庫。
+   舊流程要 退出 → 記一筆 → 切進貨 → 從 16 個品項找 → 填數量，六步。
+   系統本來就知道你在等什麼、等多少，不該叫人再講一遍。 */
+let receiveCode=null;
+// 叫貨單位可能跟庫存單位不同：茶葉叫「斤」，但庫存記 g
+function ordToBase(it,qty,unit){
+  if(!unit||unit===it.unit) return qty;
+  if(unit==="斤" && it.unit==="g") return qty*G_PER_JIN;
+  return qty;
+}
+function openReceive(code){
+  const it=items.find(i=>i.code===code); if(!it)return;
+  const o=pendingOrders.find(x=>x.item_code===code);
+  receiveCode=code;
+  const base=o?ordToBase(it,Number(o.qty),o.unit):0;
+  $("#rc-info").innerHTML = o
+    ? `<b>${it.name}</b><br>當初叫 ${o.qty}${o.unit}${o.unit!==it.unit?`（= ${base} ${it.unit}）`:""}<br>廠商給的量不一樣就改下面的數字`
+    : `<b>${it.name}</b><br>沒有對應的叫貨紀錄，直接填實際到貨量`;
+  $("#rc-unit").textContent=it.unit;
+  $("#rc-qty").value=base||"";
+  $("#rc-amt").value="";
+  $("#rc-cost-hint").textContent=`目前帳上成本 ${it.cost}/${it.unit}。填了金額會用移動平均更新，不填就維持原樣。`;
+  $("#modal-receive").classList.remove("hidden");
+}
+async function submitReceive(){
+  if(!canWrite())return;
+  const q=parseFloat($("#rc-qty").value);
+  if(!q||q<=0){toast("填數量");return;}
+  const it=items.find(i=>i.code===receiveCode); if(!it)return;
+  it.bal+=q;
+  // 選填的總金額換算成單價。不填就傳 null，後端不會動成本。
+  const amt=parseFloat($("#rc-amt").value);
+  const unitCost=(amt>0&&q>0)?Math.round(amt/q*10000)/10000:null;
+  const sent=await push("erp_log_move",{
+    p_id:uuid(),p_code:it.code,p_kind:"receive",p_qty:q,p_note:"叫貨到貨",
+    p_date:localDate(),p_unit_cost:unitCost});
+  orderedCodes=orderedCodes.filter(c=>c!==it.code);
+  pendingOrders=pendingOrders.filter(o=>o.item_code!==it.code);
+  closeModal('receive');
+  renderOrder();renderInv();renderBrew();refreshSummary();
+  toast(`${it.name} 到貨 ${q}${it.unit}`+(unitCost?`　單價 ${unitCost}`:"")+(sent?"":"　⚠ 待同步"));
+  if(sent)resyncIfClean();
 }
 
 /* 庫存 */
@@ -829,12 +1089,14 @@ function renderInv(){
   const box=$("#inv-list");box.innerHTML="";
   items.filter(i=>invCat==="全部"||i.cat===invCat).forEach(i=>{
     const s=status(i),cls=["g","y","r"][s],d=daysLeft(i);
-    const row=document.createElement("div");row.className="inv-row";row.style.cursor="pointer";
-    row.onclick=()=>openItemEdit(i.code);
+    const mgr=isManager();
+    const row=document.createElement("div");row.className="inv-row";
+    if(mgr){row.style.cursor="pointer";row.onclick=()=>openItemEdit(i.code);}
+    // 一列只放兩欄：左邊「是什麼」，右邊「還剩多少、撐多久」
+    const shown = i.tea ? `${Math.round(i.bal/i.packG*10)/10} 包` : `${i.bal} ${i.unit}`;
     row.innerHTML=`<span class="dot ${cls}"></span>
-      <div class="nm">${i.name}${i.tea?' 🍵':''}<small>${i.cat} · ${i.supplier} · 點擊編輯</small></div>
-      <div class="days">可撐<br><b>${d}</b> 天</div>
-      <div class="bal"><div class="b ${s===2?'low':''}">${i.bal}</div><div class="u">${i.unit} / 安全${i.safe}</div></div>`;
+      <div class="nm">${i.name}${i.tea?' 🍵':''}<small>${i.cat} · ${i.supplier}</small></div>
+      <div class="bal"><div class="b ${s===2?'low':''}">${shown}</div><div class="u">還夠 ${d} 天</div></div>`;
     box.appendChild(row);
   });
 }
@@ -859,7 +1121,10 @@ function openItemEdit(code){
   $("#it-bal").value=it?it.bal:"";
   $("#it-safe").value=it?it.safe:"";
   $("#it-cost").value=it?it.cost:"";
-  $("#it-avg").value=it?it.avgPerDay:"";
+  $("#it-avg").value=it?(it.avgManual??it.avgPerDay):"";
+  const ah=$("#it-avg-hint");
+  if(it&&it.avgIsActual){ah.style.display="block";ah.textContent=`目前已改用實際數據 ${it.avgPerDay}/天（近 28 天），手填值暫時不生效`;}
+  else ah.style.display="none";
   $("#it-supplier").value=it?it.supplier:"";
   // chips
   const cbox=$("#it-cats");cbox.innerHTML="";
@@ -878,39 +1143,58 @@ function openItemChips(){
 $("#it-tea").addEventListener("click",e=>{if(e.target.dataset.v){itSel.tea=e.target.dataset.v==="yes";
   [...$("#it-tea").children].forEach(b=>b.classList.toggle("on",b.dataset.v===e.target.dataset.v));}});
 async function saveItemEdit(){
+  if(!canWrite())return;
   const name=$("#it-name").value.trim();
   if(!name){toast("填品項名稱");return;}
   const bal=parseFloat($("#it-bal").value)||0, safe=parseFloat($("#it-safe").value)||0;
   const cost=parseFloat($("#it-cost").value)||0, avg=parseFloat($("#it-avg").value)||0;
   const supplier=$("#it-supplier").value.trim()||"—";
-  let it;
-  if(editingCode){
-    it=items.find(i=>i.code===editingCode);
-    Object.assign(it,{name,cat:itSel.cat,unit:itSel.unit,tea:itSel.tea,bal,safe,cost,avgPerDay:avg,supplier});
-  }else{
+
+  let code=editingCode;
+  if(!code){
     const prefix={"茶葉":"TEA","糖類":"SUG","乳品":"MLK","配料":"TOP","包材":"PKG"}[itSel.cat]||"ITM";
     const nums=items.filter(x=>x.code.startsWith(prefix)).map(x=>parseInt(x.code.split("-")[1])||0);
-    const code=`${prefix}-${String((Math.max(0,...nums)+1)).padStart(2,"0")}`;
-    it={code,name,cat:itSel.cat,unit:itSel.unit,tea:itSel.tea,bal,safe,cost,avgPerDay:avg,supplier,note:""};
-    items.push(it);
+    code=`${prefix}-${String((Math.max(0,...nums)+1)).padStart(2,"0")}`;
   }
+  const prev=items.find(i=>i.code===code);
   const wasNew=!editingCode;
+
+  // 主檔是設定不是流水帳，一定要即時寫進去確認，不進離線佇列
   $("#it-save-btn").textContent="儲存中…";
-  await cloudPush({action:"saveItem",item:JSON.stringify(it)});
+  try{
+    await callRpc("erp_save_item",{p_item:{
+      code, name, cat:itSel.cat, unit:itSel.unit, safe_qty:safe, cost,
+      supplier: supplier==="—"?null:supplier, is_tea:itSel.tea,
+      pack_g: prev?prev.packG:PACK_G, avg_per_day_manual:avg, note: prev?prev.note:"",
+      sort_order: prev?prev.sortOrder:0
+    }});
+    // 庫存欄有動 → 寫成一筆盤點調整（庫存是帳，不能直接覆蓋數字）
+    const curBal=prev?prev.bal:0;
+    if(bal!==curBal){
+      await callRpc("erp_stocktake",{p_rows:[{id:uuid(),code,counted:bal}],p_date:localDate()});
+    }
+  }catch(err){
+    $("#it-save-btn").textContent=wasNew?"新增":"儲存";
+    toast("儲存失敗："+(err.message||err.code||"請檢查連線"));
+    return;
+  }
   $("#it-save-btn").textContent=wasNew?"新增":"儲存";
   closeModal('item');
-  renderInv();renderCatTabs();renderBrew();renderSegTabs();renderLog();renderOrder();refreshSummary();
-  toast(wasNew?`已新增 ${name}（已存雲端）`:`已更新 ${name}（已存雲端）`);
+  await resyncIfClean();
+  toast(wasNew?`已新增 ${name}`:`已更新 ${name}`);
 }
 async function deleteItemEdit(){
-  if(!editingCode)return;
+  if(!editingCode||!canWrite())return;
   const it=items.find(i=>i.code===editingCode);
-  if(!confirm(`確定刪除「${it.name}」？`))return;
-  items=items.filter(i=>i.code!==editingCode);
-  await cloudPush({action:"deleteItem",code:editingCode});
-  closeModal('item');
-  renderInv();renderCatTabs();renderBrew();renderSegTabs();renderLog();renderOrder();refreshSummary();
-  toast(`已刪除 ${it.name}（已存雲端）`);
+  if(!confirm(`確定刪除「${it.name}」？\n有異動紀錄的品項會改成下架，帳才不會斷。`))return;
+  try{
+    const r=await callRpc("erp_delete_item",{p_code:editingCode});
+    closeModal('item');
+    await resyncIfClean();
+    toast(r&&r.mode==="archived"?`已下架 ${it.name}（保留歷史紀錄）`:`已刪除 ${it.name}`);
+  }catch(err){
+    toast("刪除失敗："+(err.message||err.code||"請檢查連線"));
+  }
 }
 
 /* 開銷 */
@@ -922,14 +1206,17 @@ function renderExpCats(){
 }
 $("#exp-method").addEventListener("click",e=>{if(e.target.dataset.m){expState.method=e.target.dataset.m;
   [...$("#exp-method").children].forEach(b=>b.classList.toggle("on",b.dataset.m===expState.method));}});
-function submitExpense(){
+async function submitExpense(){
+  if(!canWrite())return;
   const amt=parseFloat($("#exp-amt").value);const payee=$("#exp-payee").value.trim();
   if(!expState.cat){toast("先選類別");return;}if(!amt||amt<=0){toast("填金額");return;}
   const cat=expState.cat,method=expState.method,note=$("#exp-note").value.trim();
-  expenses.push({date:new Date().toISOString().slice(0,10),cat,amt,payee:payee||"—",method,note,paid:true});
-  cloudPush({action:"expense",cat,amt,payee:payee||"—",method,note});
+  const id=uuid(),date=localDate();
+  expenses.push({id,date,cat,amt,payee:payee||"—",method,note,paid:true});
+  const sent=await push("erp_add_expense",{
+    p_id:id,p_cat:cat,p_amount:amt,p_payee:payee||"—",p_method:method,p_note:note,p_date:date});
   $("#exp-amt").value="";$("#exp-payee").value="";$("#exp-note").value="";expState.cat=null;renderExpCats();
-  renderReport();toast(`已記 ${method} · ${money(amt)}`);
+  renderReport();toast(`已記 ${method} · ${money(amt)}`+(sent?"":"　⚠ 待同步"));
 }
 
 /* 待匯款 */
@@ -949,15 +1236,27 @@ function renderPay(){
   sum.innerHTML=`<div class="pl-row"><span class="k">待匯款合計</span><span class="v" style="color:var(--alert)">${money(total)}</span></div>`;
   body.appendChild(sum);
 }
-function confirmPay(idx){
+async function confirmPay(idx){
+  if(!canWrite())return;
   const p=pendingPays[idx];
-  expenses.push({date:new Date().toISOString().slice(0,10),cat:"廠商貨款",amt:p.amt,payee:p.payee,method:"轉帳",note:p.items||"",paid:true});
-  cloudPush({action:"expense",cat:"廠商貨款",amt:p.amt,payee:p.payee,method:"轉帳",note:p.items||""});
+  const id=uuid(),date=localDate();
+  expenses.push({id,date,cat:"廠商貨款",amt:p.amt,payee:p.payee,method:"轉帳",note:p.items||"",paid:true});
+  const sent=await push("erp_add_expense",{
+    p_id:id,p_cat:"廠商貨款",p_amount:p.amt,p_payee:p.payee,p_method:"轉帳",p_note:p.items||"",p_date:date});
   pendingPays.splice(idx,1);renderPay();renderReport();
-  toast(`${p.payee} ${money(p.amt)} 已記入帳`);
+  toast(`${p.payee} ${money(p.amt)} 已記入帳`+(sent?"":"　⚠ 待同步"));
 }
 
 /* 報表 */
+/* 真正的物料成本要從庫存異動算（耗用量 × 成本），後端 erp_month_report 有。
+   前端自己用「廠商貨款」加總是錯的：那是現金流，而且月結會差一個月。 */
+async function loadMonthReport(){
+  if(!dataReady||!isManager())return;
+  try{
+    const r=await callRpc("erp_month_report",{p_month:viewMonth});
+    if(r&&r.month===viewMonth){ monthReport=r; renderReport(); }
+  }catch(e){ console.warn("月報表讀取失敗",e); }
+}
 function renderReport(){
   const m=viewMonth;$("#rep-month").textContent=m;
   const big=$("#rep-month-big");if(big)big.textContent=fmtMonthLabel(m);
@@ -966,13 +1265,20 @@ function renderReport(){
   const mRev=dailyRevenue.filter(r=>r.date.startsWith(m)).reduce((s,r)=>s+r.amt,0);
   const monthExp=expenses.filter(e=>e.date.startsWith(m));
   const opex=monthExp.filter(e=>e.cat!=="廠商貨款").reduce((s,e)=>s+e.amt,0);
-  const cogs=monthExp.filter(e=>e.cat==="廠商貨款").reduce((s,e)=>s+e.amt,0);
+  const paid=monthExp.filter(e=>e.cat==="廠商貨款").reduce((s,e)=>s+e.amt,0);
+  /* 成本要用「當月實際耗用的料 × 成本」，不是「當月付給廠商的錢」。
+     茶葉是月結，7 月付的是 6 月的貨，兩個月份相減出來的毛利沒有意義。
+     正確的數字由後端 erp_month_report 從 erp_stock_moves 算，
+     還沒拿到就先留白，不要拿錯的數字頂著。 */
+  const haveCogs = monthReport && monthReport.month===m;
+  const cogs = haveCogs ? Number(monthReport.cogs)||0 : null;
   $("#pl-rev").textContent=mRev?money(mRev):"—";
-  $("#pl-cogs").textContent=cogs?money(cogs):"—";
+  $("#pl-cogs").textContent=haveCogs?money(cogs):"計算中…";
+  $("#pl-paid").textContent=paid?money(paid):"—";
   $("#pl-opex").textContent=money(opex);
-  if(mRev){const profit=mRev-cogs-opex;
+  if(mRev&&haveCogs){const profit=mRev-cogs-opex;
     const el=$("#pl-profit");el.textContent=money(profit);el.classList.toggle("neg",profit<0);
-  } else $("#pl-profit").textContent="待營收";
+  } else $("#pl-profit").textContent=mRev?"計算中…":"待營收";
   // breakdown
   const bd=$("#exp-breakdown");bd.innerHTML="";
   const byCat={};monthExp.forEach(e=>byCat[e.cat]=(byCat[e.cat]||0)+e.amt);
@@ -991,23 +1297,19 @@ function renderReport(){
     r.innerHTML=`<div class="l"><div class="n">${e.cat} · ${e.payee}</div>
       <div class="s">${e.date} · ${e.method}${e.note?" · "+e.note:""}</div></div>
       <div class="r" style="display:flex;align-items:center;gap:10px"><div class="a">${money(e.amt)}</div>
-      <button class="del-btn" onclick="deleteExpense('${e.date}','${e.cat}',${e.amt},'${(e.payee||"").replace(/'/g,"")}')">刪除</button></div>`;
+      <button class="del-btn" onclick="deleteExpense('${e.id}')">刪除</button></div>`;
     list.appendChild(r);
   });
 }
-function deleteExpense(date,cat,amt,payee){
-  if(!confirm(`確定刪除這筆開銷？\n${cat} ${money(amt)} ${payee}`))return;
-  // 只刪一筆(第一個符合的)
-  const idx=expenses.findIndex(e=>e.date===date&&e.cat===cat&&Number(e.amt)===Number(amt)&&(e.payee||"")===payee);
-  if(idx>=0)expenses.splice(idx,1);
-  cloudPush({action:"deleteExpense",date,cat,amt,payee});
+async function deleteExpense(id){
+  if(!canWrite())return;
+  const e=expenses.find(x=>x.id===id);
+  if(!e){toast("找不到這筆");return;}
+  if(!confirm(`確定刪除這筆開銷？\n${e.cat} ${money(e.amt)} ${e.payee}`))return;
+  expenses=expenses.filter(x=>x.id!==id);
+  const sent=await push("erp_delete_expense",{p_id:id});
   renderReport();
-  toast("已刪除該筆開銷");
-}
-function importRevenue(){
-  const v=prompt("貼上微碧本月營業額（只填數字）：");
-  if(v===null)return;const n=parseFloat(v.replace(/[^0-9.]/g,""));
-  if(!n){toast("沒讀到數字");return;}monthRevenue=n;renderReport();toast("已帶入營收 "+money(n));
+  toast("已刪除該筆開銷"+(sent?"":"　⚠ 待同步"));
 }
 function exportCSV(){
   const m=viewMonth;const rows=[["日期","類別","金額","付給誰","付款方式","備註"]];
@@ -1018,38 +1320,230 @@ function exportCSV(){
   toast("已匯出 CSV");
 }
 
-/* ===== 盤點 ===== */
+/* ===== 微碧 POS 匯入 =====
+   固定吃「訂單列表.csv」。三個匯出檔只有它同時有日期、金額、品項、數量、選項：
+     訂單列表 ← 用這個
+     營運總表 品項分析是「一欄一個品項」的轉置版面，而且沒有選項
+     交易列表 只有付款金額，沒有品項
+   已用 2026/09/07 的真實檔驗過：69 筆訂單、$6,663、26 個品項的數量
+   全部對得上微碧自己的營運總表。 */
+let posDays=[], posItems=[], posFileName="", posFileHash="";
+
+function parseCSV(text){
+  if(text.charCodeAt(0)===0xFEFF) text=text.slice(1);
+  const rows=[]; let row=[], cell="", q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){
+      if(c==='"'){ if(text[i+1]==='"'){cell+='"';i++;} else q=false; }
+      else cell+=c;
+    }else{
+      if(c==='"') q=true;
+      else if(c===","){ row.push(cell); cell=""; }
+      else if(c==="\n"){ row.push(cell); rows.push(row); row=[]; cell=""; }
+      else if(c!=="\r") cell+=c;
+    }
+  }
+  if(cell!==""||row.length){ row.push(cell); rows.push(row); }
+  return rows.map(r=>r.map(x=>x.trim()));
+}
+
+async function sha256Hex(buf){
+  const h=await crypto.subtle.digest("SHA-256", buf);
+  return [...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+function posNum(v){
+  const n=parseFloat(String(v==null?"":v).replace(/[^0-9.\-]/g,""));
+  return isNaN(n)?0:n;
+}
+
+/* 訂單項目欄：
+     "台東紅烏龍鮮奶茶奶蓋 x 2(1分甜,5分冰,封膜); 四杯袋"
+   → [{name:"台東紅烏龍鮮奶茶奶蓋", qty:2, options:"1分甜,5分冰,封膜"},
+      {name:"四杯袋", qty:1, options:""}]
+   注意「伯爵茶奶蓋 (3分甜,5分冰)」括號前有空格，名稱要 trim。 */
+function parseOrderItems(cell){
+  const out=[];
+  (cell||"").split(";").forEach(part=>{
+    part=part.trim(); if(!part) return;
+    let options="";
+    const m=part.match(/\(([^()]*)\)\s*$/);
+    if(m){ options=m[1]; part=part.slice(0,m.index).trim(); }
+    let qty=1;
+    const q=part.match(/\s*[xX×]\s*(\d+)\s*$/);
+    if(q){ qty=parseInt(q[1],10); part=part.slice(0,q.index).trim(); }
+    if(part) out.push({name:part.trim(), qty, options});
+  });
+  return out;
+}
+
+function openPosImport(){
+  posDays=[];posItems=[];posFileName="";posFileHash="";
+  $("#pos-file").value="";
+  $("#pos-result").innerHTML="";
+  $("#pos-import-btn").style.display="none";
+  $("#modal-pos").classList.remove("hidden");
+}
+
+function posPickFile(input){
+  const f=input.files&&input.files[0];
+  if(!f) return;
+  if(/\.(xlsx|xls|numbers)$/i.test(f.name)){
+    toast("請選 CSV，不是 Excel 檔");return;
+  }
+  posFileName=f.name;
+  const fr=new FileReader();
+  fr.onload=async e=>{
+    posFileHash=await sha256Hex(e.target.result);
+    const rows=parseCSV(new TextDecoder("utf-8").decode(e.target.result))
+                 .filter(r=>r.some(c=>c!==""));
+    posBuild(rows);
+  };
+  fr.readAsArrayBuffer(f);
+}
+
+function posBuild(rows){
+  const box=$("#pos-result");
+  const hdr=rows[0]||[];
+  const col=n=>hdr.indexOf(n);
+  const cNo=col("訂單編號"), cStat=col("訂單狀態"), cTotal=col("總價"),
+        cPaid=col("付款時間"), cItems=col("訂單項目");
+
+  if(cItems<0||cTotal<0||cPaid<0){
+    // 認錯檔最常見，直接告訴他該選哪一個
+    const which = hdr.includes("交易編號") ? "「交易列表」" :
+                  (rows[0]&&rows[0][0]||"").includes("營運總表") ? "「營運總表」" : "這個檔案";
+    box.innerHTML=`<div class="pl-card"><div class="pl-row">
+      <span class="k" style="color:var(--alert)">格式不對</span>
+      <span class="v" style="font-size:13px">${which}沒有品項明細<br>請選「訂單列表.csv」</span></div></div>`;
+    $("#pos-import-btn").style.display="none";
+    return;
+  }
+
+  const dayMap={}; posItems=[]; let skipped=0;
+  rows.slice(1).forEach(r=>{
+    if(cStat>=0 && r[cStat] && r[cStat]!=="完成"){ skipped++; return; }  // 取消的不算
+    const paid=r[cPaid]||"";
+    const m=paid.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+    if(!m){ skipped++; return; }
+    const d=`${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
+    if(!dayMap[d]) dayMap[d]={date:d,revenue:0,orders:0};
+    dayMap[d].revenue+=posNum(r[cTotal]);
+    dayMap[d].orders++;
+    parseOrderItems(r[cItems]).forEach(it=>{
+      posItems.push({date:d, order_no:cNo>=0?r[cNo]:null,
+                     name:it.name, qty:it.qty, options:it.options});
+    });
+  });
+
+  posDays=Object.values(dayMap).sort((a,b)=>a.date.localeCompare(b.date));
+  if(!posDays.length){
+    box.innerHTML=`<div class="pl-card"><div class="pl-row">
+      <span class="k" style="color:var(--alert)">讀不到完成的訂單</span></div></div>`;
+    $("#pos-import-btn").style.display="none";
+    return;
+  }
+
+  const rev=posDays.reduce((s,d)=>s+d.revenue,0);
+  const ords=posDays.reduce((s,d)=>s+d.orders,0);
+  const cups=posItems.reduce((s,i)=>s+i.qty,0);
+  const optCount=t=>posItems.filter(i=>i.options.includes(t)).reduce((s,i)=>s+i.qty,0);
+  const eco=optCount("環保杯"), film=optCount("封膜");
+  const kinds=new Set(posItems.map(i=>i.name)).size;
+
+  box.innerHTML=`<div class="pl-card">
+    <div class="pl-row"><span class="k">日期</span><span class="v">${posDays[0].date}${posDays.length>1?" ～ "+posDays[posDays.length-1].date:""}</span></div>
+    <div class="pl-row"><span class="k">完成訂單</span><span class="v">${ords} 筆${skipped?`（跳過 ${skipped}）`:""}</span></div>
+    <div class="pl-row"><span class="k">營業額</span><span class="v">${money(rev)}</span></div>
+    <div class="pl-row"><span class="k">品項</span><span class="v">${cups} 件 · ${kinds} 種</span></div>
+    <div class="pl-row"><span class="k">自帶環保杯</span><span class="v">${eco}</span></div>
+    <div class="pl-row"><span class="k">封膜</span><span class="v">${film}</span></div>
+  </div>
+  <div style="font-size:11px;color:var(--grey);line-height:1.6;margin-bottom:12px">
+    對一下微碧「營運總表」的訂單數和營業額，數字一樣就沒問題。
+  </div>`;
+  $("#pos-import-btn").style.display="block";
+}
+
+async function submitPosImport(){
+  if(!canWrite())return;
+  if(!posDays.length){toast("沒有可匯入的資料");return;}
+  if(!confirm(`確認匯入？\n${posDays.length} 天 · ${posItems.length} 個品項列\n這幾天的營收會被 POS 金額覆蓋。`))return;
+  const btn=$("#pos-import-btn");btn.disabled=true;btn.textContent="匯入中…";
+  try{
+    const r=await callRpc("erp_pos_import",{
+      p_id:uuid(), p_file_name:posFileName, p_file_hash:posFileHash,
+      p_days:posDays, p_rows:posItems, p_source:"weiby"});
+    btn.disabled=false;btn.textContent="確認匯入";
+    if(r&&r.ok===false){toast("⚠ "+(r.message||"匯入失敗"));return;}
+    closeModal('pos');
+    await resyncIfClean();
+    toast(`已匯入 ${r.days} 天 · ${r.orders} 筆訂單 · ${money(r.revenue)}`);
+  }catch(err){
+    btn.disabled=false;btn.textContent="確認匯入";
+    toast("匯入失敗："+(err.message||err.code||"請檢查連線"));
+  }
+}
+
+/* ===== 盤點 =====
+   茶葉讓店員填「幾包」而不是「幾公克」——沒有人盤點時在秤茶葉，
+   填 g 等於逼人心算。未拆的數包數，拆開那包估半包。 */
 let stocktakeVals={};
-function openStocktake(){
-  stocktakeVals={};
-  const box=$("#stocktake-list");box.innerHTML="";
+// 盤點單位：茶葉用「包」，其餘用品項本來的單位
+function stUnit(it){ return it.tea ? "包" : it.unit; }
+function stSys(it){ return it.tea ? Math.round(it.bal/it.packG*10)/10 : it.bal; }
+function stToBase(it,v){ return it.tea ? v*it.packG : v; }
+
+function renderStocktake(){
+  const box=$("#stocktake-list"); if(!box) return;
+  box.innerHTML="";
   items.forEach(it=>{
+    const u=stUnit(it), sys=stSys(it);
+    const prev=stocktakeVals[it.code];
     const row=document.createElement("div");row.className="st-row";
-    row.innerHTML=`<div class="nm">${it.name}</div>
-      <div class="sys">系統 ${it.bal}${it.unit}</div>
-      <input type="number" inputmode="decimal" placeholder="實數" id="st-${it.code}" oninput="calcDiff('${it.code}')">
+    row.innerHTML=`<div class="nm">${it.name}${it.tea?' 🍵':''}</div>
+      <div class="sys">帳面 ${sys}${u}</div>
+      <input type="number" inputmode="decimal" step="0.5" placeholder="實數(${u})" id="st-${it.code}"
+             value="${prev===undefined?"":prev}" oninput="calcDiff('${it.code}')">
       <div class="diff zero" id="stdiff-${it.code}">—</div>`;
     box.appendChild(row);
+    if(prev!==undefined) setTimeout(()=>calcDiff(it.code),0);
   });
-  $("#modal-stocktake").classList.remove("hidden");
 }
+// 舊名稱，避免其他地方還在呼叫
+function openStocktake(){ setMode('money'); nav('stocktake'); }
+
 function calcDiff(code){
   const it=items.find(i=>i.code===code);
   const v=parseFloat($("#st-"+code).value);
   const el=$("#stdiff-"+code);
-  if(isNaN(v)){el.textContent="—";el.className="diff zero";stocktakeVals[code]=undefined;return;}
-  const d=v-it.bal;stocktakeVals[code]=v;
+  if(isNaN(v)){el.textContent="—";el.className="diff zero";delete stocktakeVals[code];return;}
+  stocktakeVals[code]=v;
+  const d=Math.round((v-stSys(it))*10)/10;
   el.textContent=(d>0?"+":"")+d;
   el.className="diff "+(d<0?"neg":d>0?"pos":"zero");
 }
-function submitStocktake(){
-  let n=0;const rows=[];
-  items.forEach(it=>{const v=stocktakeVals[it.code];if(v!==undefined&&!isNaN(v)){
-    rows.push({code:it.code,name:it.name,system:it.bal,actual:v});it.bal=v;n++;}});
-  if(!n){toast("還沒填任何實數");return;}
-  cloudPush({action:"stocktake",rows:JSON.stringify(rows)});
-  closeModal('stocktake');renderInv();renderOrder();renderBrew();refreshSummary();
-  toast(`盤點完成，校正了 ${n} 個品項`);
+
+async function submitStocktake(){
+  if(!canWrite())return;
+  let n=0;const rows=[];const lines=[];
+  items.forEach(it=>{
+    const v=stocktakeVals[it.code];
+    if(v===undefined||isNaN(v))return;
+    const base=stToBase(it,v);
+    if(base===it.bal)return;                     // 沒差異就不必寫一筆
+    rows.push({id:uuid(),code:it.code,counted:base});
+    lines.push(`${it.name} ${v}${stUnit(it)}`);
+    it.bal=base;n++;
+  });
+  if(!n){toast("沒有需要校正的品項");return;}
+  if(!confirm(`確認校正 ${n} 個品項？\n${lines.slice(0,6).join("、")}${lines.length>6?"…":""}`))return;
+  // 差額由後端當下重算，不是用這台手機看到的數字，別台同時記的也算得進去
+  const sent=await push("erp_stocktake",{p_rows:rows,p_date:localDate()});
+  stocktakeVals={};
+  renderStocktake();renderInv();renderOrder();renderBrew();refreshSummary();
+  toast(`盤點完成，校正了 ${n} 個品項`+(sent?"":"　⚠ 待同步"));
+  if(sent)resyncIfClean();
 }
 
 /* ===== 損耗/報廢 ===== */
@@ -1075,18 +1569,31 @@ function openWaste(){
   $("#waste-qty").value="";
   $("#modal-waste").classList.remove("hidden");
 }
-function submitWaste(){
+// 損耗填的單位換算成品項單位。換不了就擋下來，
+// 舊版遇到這種情況是「記一筆但不扣庫存」，帳會愈跑愈歪。
+function toItemUnit(qty,fromUnit,itemUnit){
+  if(fromUnit===itemUnit) return qty;
+  const k=`${fromUnit}>${itemUnit}`;
+  const table={"公克>g":1,"g>公克":1,"斤>g":600,"kg>g":1000,"g>kg":0.001};
+  return table[k]!==undefined ? qty*table[k] : null;
+}
+async function submitWaste(){
+  if(!canWrite())return;
   const q=parseFloat($("#waste-qty").value);
   if(!wasteState.code){toast("先選品項");return;}
   if(!q||q<=0){toast("填數量");return;}
   if(!wasteState.reason){toast("選原因");return;}
   const it=items.find(i=>i.code===wasteState.code);
   const unit=wasteState.unit||it.unit;
-  // 若損耗單位與品項單位相同才扣庫存(不同單位無法直接換算，只記錄)
-  if(unit===it.unit) it.bal=Math.max(0,it.bal-q);
-  cloudPush({action:"waste",code:it.code,name:it.name,qty:q,unit,reason:wasteState.reason});
+  const qty=toItemUnit(q,unit,it.unit);
+  if(qty===null){toast(`${unit} 換不成 ${it.unit}，請改用 ${it.unit} 填`);return;}
+  it.bal=Math.max(0,it.bal-qty);
+  const sent=await push("erp_log_move",{
+    p_id:uuid(),p_code:it.code,p_kind:"waste",p_qty:qty,
+    p_note:`${wasteState.reason}（填 ${q}${unit}）`,p_date:localDate()});
   closeModal('waste');renderInv();renderOrder();renderBrew();refreshSummary();
-  toast(`${it.name} 損耗 ${q}${unit}（${wasteState.reason}）`);
+  toast(`${it.name} 損耗 ${q}${unit}（${wasteState.reason}）`+(sent?"":"　⚠ 待同步"));
+  if(sent)resyncIfClean();
 }
 function closeModal(name){$("#modal-"+name).classList.add("hidden");}
 
@@ -1143,22 +1650,27 @@ function renderRevenue(){
     box.appendChild(row);
   });
 }
-function deleteRevenue(date){
+async function deleteRevenue(date){
+  if(!canWrite())return;
   if(!confirm(`確定刪除 ${date.slice(5)} 的營收記錄？`))return;
   dailyRevenue=dailyRevenue.filter(r=>r.date!==date);
-  cloudPush({action:"deleteRevenue",date});
-  monthRevenue=dailyRevenue.filter(r=>r.date.startsWith(curMonth())).reduce((s,r)=>s+r.amt,0);
+  const sent=await push("erp_delete_revenue",{p_date:date});
   renderRevenue();renderReport();
-  toast("已刪除該筆營收");
+  toast("已刪除該筆營收"+(sent?"":"　⚠ 待同步"));
 }
 
 /* nav */
-const STOCK_TABS=[["brew","🍵","煮茶"],["log","✎","記一筆"],["order","⚑","叫貨"],["inv","▦","庫存"]];
-const MONEY_TABS=[["revenue","$","營收"],["expense","✎","記開銷"],["report","▤","報表"],["recon","☰","月結"]];
+/* 分頁按「多久做一次」分，不是按「是庫存還是帳務」。
+   舊的分法把每天要做的事散在兩個模式裡，每月一次的也散在兩邊，
+   所以會一直來回切。 */
+const STOCK_TABS=[["brew","🍵","煮茶"],["order","⚑","叫貨"],["log","✎","用量"],["inv","▦","庫存"]];
+const MONEY_TABS=[["stocktake","📋","盤點"],["revenue","$","營收"],["expense","✎","開銷"],["report","▤","報表"],["recon","☰","月結"]];
 let mode="stock";
 function setMode(m){
+  if(m==="money" && !isManager()){toast("帳務功能限店長使用");return;}
   mode=m;$("#mode-stock").classList.toggle("on",m==="stock");$("#mode-money").classList.toggle("on",m==="money");
   $("#appTitle").textContent=m==="stock"?"Daybook":"Ledger";
+  if(m==="money") renderStocktake();
   buildTabs();nav((m==="stock"?STOCK_TABS:MONEY_TABS)[0][0]);
 }
 function buildTabs(){
@@ -1168,42 +1680,103 @@ function buildTabs(){
     b.innerHTML=`<span class="ic">${ic}</span><span class="lb">${lb}</span>`;b.onclick=()=>nav(s);bar.appendChild(b);
   });
 }
+let curScreen="brew";
 function nav(scr){
-  ["brew","log","order","inv","expense","report","recon","revenue"].forEach(s=>$("#scr-"+s).classList.toggle("hidden",s!==scr));
+  curScreen=scr;
+  ["brew","log","order","inv","expense","report","recon","revenue","stocktake"].forEach(s=>$("#scr-"+s).classList.toggle("hidden",s!==scr));
   [...document.querySelectorAll(".tab")].forEach(t=>t.classList.toggle("on",t.dataset.scr===scr));
   $("#submit-brew").classList.toggle("hidden",scr!=="brew");
   $("#submit-log").classList.toggle("hidden",scr!=="log");
   $("#submit-expense").classList.toggle("hidden",scr!=="expense");
-  if(scr==="report")renderReport();
+  $("#submit-stocktake").classList.toggle("hidden",scr!=="stocktake");
+  if(scr==="report"){renderReport();loadMonthReport();}
   if(scr==="expense")renderPay();
   if(scr==="recon")renderRecon();
   if(scr==="revenue")renderRevenue();
+  if(scr==="stocktake")renderStocktake();
 }
 
 function renderAll(){
   renderSegTabs();renderBrew();renderLog();renderOrder();renderCatTabs();renderInv();refreshSummary();
-  renderExpCats();renderReport();renderPay();buildTabs();
+  renderExpCats();renderReport();renderPay();renderStocktake();renderTodo();buildTabs();
   $("#log-submit-btn").textContent="記錄用量";
 }
-(async function(){
+function headerBase(){
   const d=new Date(),wk=["日","一","二","三","四","五","六"][d.getDay()];
-  const base=`${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")} 星期${wk}`;
-  // 第一階段：立刻用本機資料畫一次(畫面秒出，絕不空白)
-  $("#today").textContent=base+" · 連線中…";
+  return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")} 星期${wk}`;
+}
+
+async function signIn(){
+  const email=$("#lg-email").value.trim(), pw=$("#lg-pw").value;
+  const err=$("#lock-err"), btn=$("#lg-btn");
+  if(!email||!pw){err.textContent="請填帳號和密碼";return;}
+  btn.disabled=true;btn.textContent="登入中…";err.textContent="";
+  const {error}=await sb.auth.signInWithPassword({email,password:pw});
+  btn.disabled=false;btn.textContent="登入";
+  if(error){err.textContent="登入失敗，請確認帳號密碼。";return;}
+  $("#lg-pw").value="";
+  await enterApp();
+}
+
+async function signOut(){
+  if(queue.length && !confirm(`還有 ${queue.length} 筆沒同步到雲端。\n登出後這些紀錄會留在這台裝置，要下次同一台登入才送得出去。\n確定登出？`))return;
+  await sb.auth.signOut();
+  location.reload();
+}
+
+/* 登入成功後：先把上次沒送出去的補送，再載入資料 */
+async function enterApp(){
+  const err=$("#lock-err");
+  err.textContent="";
+  if(queue.length) await flush();
+  try{
+    await cloudLoad();
+  }catch(e){
+    const code=String((e&&e.code)||"");
+    if(code==="42501"){
+      err.textContent="這個帳號沒有 ERP 權限。請管理者把你加進員工名冊（erp_staff）。";
+      await sb.auth.signOut();
+      return;
+    }
+    err.textContent="連線失敗，請檢查網路後重試。"+(queue.length?`\n（${queue.length} 筆待同步紀錄已保留在本機，不會遺失）`:"");
+    return;
+  }
+  $("#lock-screen").style.display="none";
+  $("#today").textContent=headerBase()+(me&&me.name?` · ${me.name}`:"");
+  applyRole();
   renderAll();
   nav("brew");
-  // 第二階段：雲端載入(加逾時保護，網慢也不會卡死)
+  queueBadge();
+  // 上次關掉前還沒自動存檔的點記，登入後立刻補送
+  if(Object.values(brewToday).some(v=>v>0)) flushBrew();
+}
+
+/* 佇列清空後才可以拿雲端狀態覆蓋本地，否則會洗掉還沒送出的樂觀更新 */
+async function resyncIfClean(){
+  if(queue.length) return false;
   try{
-    await Promise.race([
-      cloudLoad(),
-      new Promise((_,rej)=>setTimeout(()=>rej("timeout"),8000))
-    ]);
-  }catch(e){ /* 逾時或失敗就維持本機資料 */ }
-  monthRevenue=dailyRevenue.filter(r=>r.date.startsWith(curMonth())).reduce((s,r)=>s+r.amt,0);
-  $("#today").textContent=base+(cloudReady?" · ☁ 已連線":" · ⚠ 離線(本機)");
-  // 雲端回來後再畫一次，覆蓋成最新
-  renderAll();
-  nav("brew"); // 預設停在煮茶頁，並顯示「登記今日煮茶」按鈕
+    await cloudLoad();
+    renderAll();
+    applyRole();
+    nav(curScreen);
+    return true;
+  }catch(e){ console.warn("重新同步失敗",e); return false; }
+}
+
+// 回到線上 / 切回前景，自動補送
+window.addEventListener("online",async()=>{ if(await flush()) resyncIfClean(); });
+document.addEventListener("visibilitychange",async()=>{
+  if(document.visibilityState==="visible" && dataReady && queue.length){
+    if(await flush()) resyncIfClean();
+  }
+});
+setInterval(()=>{ if(queue.length) flush(); },30000);
+
+(async function(){
+  $("#today").textContent=headerBase();
+  const {data}=await sb.auth.getSession();
+  if(data && data.session) await enterApp();
+  else $("#lg-email").focus();
 })();
 </script>
 </body>

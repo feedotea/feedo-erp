@@ -1,0 +1,197 @@
+-- =====================================================================
+-- FEEDO ERP · 微碧 POS 匯入
+--
+-- 資料來源固定用「訂單列表.csv」。三個匯出檔只有它同時有
+-- 日期 + 金額 + 品項 + 數量 + 選項：
+--
+--   訂單列表   ← 用這個
+--   營運總表   品項分析是「一欄一個品項」的轉置版面，且無選項
+--   交易列表   只有付款金額，沒有品項
+--
+-- 訂單項目欄長這樣（整格被引號包起來，逗號在引號內）：
+--   "台東紅烏龍鮮奶茶奶蓋 x 2(1分甜,5分冰,封膜); 四杯袋"
+--   → 品項間用 "; " 隔開；" x N" 是數量；括號內是選項
+--
+-- 選項裡的「環保杯」「封膜」之後要拿來精算包材：
+-- 賣 100 杯但有 2 杯自帶環保杯 → 只扣 98 個紙杯。
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- 先清掉上一版 05 的殘留物。
+-- 上一版假設報表是「一列一個品項」的平表，欄位和函式簽章都不一樣；
+-- create or replace 遇到不同簽章會變成「多一個多載」而不是取代，
+-- 所以一定要先 drop。這些表在正式使用前不會有資料，砍掉是安全的。
+-- ---------------------------------------------------------------------
+drop function if exists erp_pos_import(uuid, text, text, jsonb, jsonb, text);
+drop function if exists erp_pos_config(text);
+drop table    if exists erp_pos_columns;
+drop table    if exists erp_pos_sales   cascade;
+drop table    if exists erp_pos_imports cascade;
+
+create table if not exists erp_pos_imports (
+  id          uuid primary key,
+  source      text not null default 'weiby',
+  file_name   text,
+  file_hash   text not null,
+  date_from   date,
+  date_to     date,
+  order_count int  not null default 0,
+  row_count   int  not null default 0,
+  revenue     numeric(14,2) not null default 0,
+  imported_by uuid not null references auth.users(id),
+  imported_at timestamptz not null default now()
+);
+
+create unique index if not exists erp_pos_imports_hash_idx
+  on erp_pos_imports (source, file_hash);
+
+create table if not exists erp_pos_sales (
+  id         uuid primary key default gen_random_uuid(),
+  import_id  uuid not null references erp_pos_imports(id) on delete cascade,
+  sales_on   date not null,
+  order_no   text,                          -- 訂單編號，對得回微碧
+  pos_name   text not null,                 -- 品項名（已去掉數量與括號）
+  qty        numeric(12,2) not null default 1,
+  options    text not null default '',      -- 3分甜,5分冰,封膜
+  amount     numeric(14,2) not null default 0
+);
+
+create index if not exists erp_pos_sales_date_idx on erp_pos_sales (sales_on);
+create index if not exists erp_pos_sales_name_idx on erp_pos_sales (pos_name);
+
+-- 微碧品項名 → ERP 品項。做配方扣料前必須先對應完。
+create table if not exists erp_pos_item_map (
+  pos_name   text primary key,
+  item_code  text references erp_items(code) on update cascade,
+  ignored    boolean not null default false,
+  mapped_by  uuid references auth.users(id),
+  mapped_at  timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------
+-- 匯入
+--   p_days : [{"date":"2026-09-07","revenue":6663,"orders":69}]
+--            營收用訂單總價加總，不是用品項金額 ——
+--            訂單列表沒有逐品項的錢，只有整張訂單的總價。
+--   p_rows : [{"date":"...","order_no":"910167","name":"台東紅烏龍",
+--              "qty":2,"options":"1分甜,3分冰"}]
+-- ---------------------------------------------------------------------
+create or replace function erp_pos_import(
+  p_id        uuid,
+  p_file_name text,
+  p_file_hash text,
+  p_days      jsonb,
+  p_rows      jsonb,
+  p_source    text default 'weiby'
+) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  uid    uuid := erp_require_manager();
+  dates  date[];
+  d      jsonb;
+  n      int;
+  dfrom  date;
+  dto    date;
+  tot    numeric := 0;
+  ords   int := 0;
+begin
+  if p_days is null or jsonb_array_length(p_days) = 0 then
+    raise exception '沒有可匯入的營業日' using errcode = '22023';
+  end if;
+
+  if exists (select 1 from erp_pos_imports
+             where source = p_source and file_hash = p_file_hash) then
+    return jsonb_build_object('ok', false, 'reason', 'duplicate',
+                              'message', '這份檔案已經匯入過了');
+  end if;
+
+  select array_agg((x->>'date')::date), min((x->>'date')::date), max((x->>'date')::date),
+         sum((x->>'revenue')::numeric), sum(coalesce((x->>'orders')::int, 0))
+    into dates, dfrom, dto, tot, ords
+    from jsonb_array_elements(p_days) x;
+
+  insert into erp_pos_imports (id, source, file_name, file_hash,
+                               date_from, date_to, order_count, revenue, imported_by)
+  values (p_id, p_source, p_file_name, p_file_hash, dfrom, dto, ords, tot, uid);
+
+  -- 同一天重匯（補了漏單再匯一次）→ 該日整批換掉，不疊加
+  delete from erp_pos_sales where sales_on = any(dates);
+
+  insert into erp_pos_sales (import_id, sales_on, order_no, pos_name, qty, options)
+  select p_id, (r->>'date')::date, r->>'order_no', r->>'name',
+         coalesce((r->>'qty')::numeric, 1), coalesce(r->>'options', '')
+  from jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) r;
+
+  get diagnostics n = row_count;
+  update erp_pos_imports set row_count = n where id = p_id;
+
+  -- 營收以 POS 為準，直接蓋掉手 key 的值
+  for d in select * from jsonb_array_elements(p_days) loop
+    insert into erp_revenue (revenue_on, amount, note, updated_by, updated_at)
+    values ((d->>'date')::date, (d->>'revenue')::numeric, '微碧匯入', uid, now())
+    on conflict (revenue_on) do update set
+      amount = excluded.amount, note = excluded.note,
+      updated_by = excluded.updated_by, updated_at = now();
+  end loop;
+
+  return jsonb_build_object('ok', true, 'rows', n, 'orders', ords,
+                            'revenue', tot, 'date_from', dfrom, 'date_to', dto,
+                            'days', array_length(dates, 1));
+end $$;
+
+-- ---------------------------------------------------------------------
+-- 匯入後的狀態：還沒對應的品項名、最近幾次匯入
+-- ---------------------------------------------------------------------
+create or replace function erp_pos_config(p_source text default 'weiby')
+returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+begin
+  perform erp_require_manager();
+  return jsonb_build_object(
+    'unmapped', (select coalesce(jsonb_agg(x order by x.qty desc), '[]'::jsonb) from (
+                   select s.pos_name as name, sum(s.qty) as qty
+                   from erp_pos_sales s
+                   left join erp_pos_item_map m on m.pos_name = s.pos_name
+                   where m.pos_name is null
+                   group by s.pos_name) x),
+    'mapped',   (select coalesce(jsonb_agg(to_jsonb(m)), '[]'::jsonb) from erp_pos_item_map m),
+    'imports',  (select coalesce(jsonb_agg(to_jsonb(i) order by i.imported_at desc), '[]'::jsonb)
+                 from (select * from erp_pos_imports
+                       order by imported_at desc limit 20) i)
+  );
+end $$;
+
+create or replace function erp_pos_map_item(
+  p_pos_name text, p_item_code text default null, p_ignored boolean default false
+) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := erp_require_manager();
+begin
+  insert into erp_pos_item_map (pos_name, item_code, ignored, mapped_by, mapped_at)
+  values (p_pos_name, p_item_code, p_ignored, uid, now())
+  on conflict (pos_name) do update set
+    item_code = excluded.item_code, ignored = excluded.ignored,
+    mapped_by = excluded.mapped_by, mapped_at = now();
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- ---------------------------------------------------------------------
+-- 權限
+-- ---------------------------------------------------------------------
+alter table erp_pos_imports  enable row level security;
+alter table erp_pos_sales    enable row level security;
+alter table erp_pos_item_map enable row level security;
+
+alter table erp_pos_imports  force row level security;
+alter table erp_pos_sales    force row level security;
+alter table erp_pos_item_map force row level security;
+
+revoke all on erp_pos_imports, erp_pos_sales, erp_pos_item_map from anon, authenticated;
+
+revoke all on function erp_pos_config(text)                       from public, anon;
+revoke all on function erp_pos_import(uuid,text,text,jsonb,jsonb,text) from public, anon;
+revoke all on function erp_pos_map_item(text,text,boolean)        from public, anon;
+
+grant execute on function erp_pos_config(text)                       to authenticated;
+grant execute on function erp_pos_import(uuid,text,text,jsonb,jsonb,text) to authenticated;
+grant execute on function erp_pos_map_item(text,text,boolean)        to authenticated;
