@@ -252,13 +252,15 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   <div class="seg-tabs" id="seg-tabs" style="display:none"></div>
   <div class="card" id="brew-list"></div>
   <div id="brew-pending" style="font-size:11px;color:var(--grey);letter-spacing:.5px;text-align:center;padding:8px 0;min-height:26px"></div>
+  <div id="rev-box">
   <div class="sec-eyebrow">打烊 · 今日營收</div>
   <div class="card card-pad">
     <div class="field" style="margin-bottom:0">
       <label>今日營業額（看微碧當日總額，填數字）</label>
       <input class="num-input" id="today-rev" type="number" inputmode="decimal" placeholder="0" oninput="updateBrewPending()">
-      <div style="font-size:11px;color:var(--grey);margin-top:6px;letter-spacing:.5px" id="rev-hint">跟今天用掉的料一起送出，就能算出今日毛利</div>
+      <div style="font-size:11px;color:var(--grey);margin-top:6px;letter-spacing:.5px" id="rev-hint">微碧報表匯入後會自動蓋掉這個數字，臨時要記才填</div>
     </div>
+  </div>
   </div>
   <div class="scroll-hint"></div>
 </div>
@@ -332,7 +334,7 @@ select.txt-input{appearance:none;-webkit-appearance:none}
       <label>實際到貨數量（<span id="rc-unit"></span>）</label>
       <input class="txt-input" id="rc-qty" type="number" inputmode="decimal" placeholder="0">
     </div>
-    <div class="field">
+    <div class="field" id="rc-cost-box">
       <label>這批多少錢<small style="color:var(--grey);font-weight:400"> · 選填，月結還不知道價格就留空</small></label>
       <input class="txt-input" id="rc-amt" type="number" inputmode="decimal" placeholder="出貨單上的金額">
       <div style="font-size:11px;color:var(--grey);margin-top:5px;line-height:1.5" id="rc-cost-hint"></div>
@@ -573,6 +575,9 @@ function applyRole(){
   const mgr = isManager();
   $("#mode-money").style.display = mgr ? "" : "none";
   $("#st-val-box").style.display = mgr ? "" : "none";   // 庫存總值 = 成本資訊
+  // 每天的營業額和進貨單價都是錢，店員不該看到
+  $("#rev-box").style.display     = mgr ? "" : "none";
+  $("#rc-cost-box").style.display = mgr ? "" : "none";
   $("#btn-new-item").parentElement.style.display = mgr ? "" : "none";
   $("#role-tag").textContent = mgr ? "店長" : "店員";
   if(!mgr && mode === "money") setMode("stock");
@@ -747,7 +752,8 @@ async function flushBrew(){
     const b=brewToday[t.code]||0;
     if(b>0) rows.push({id:uuid(),code:t.code,buckets:b});
   });
-  const rev=parseFloat($("#today-rev").value);
+  // 店員不經手金額，就算把欄位挖出來填也不會送出去
+  const rev = isManager() ? parseFloat($("#today-rev").value) : NaN;
   if(!rows.length && !(rev>0)) return;
   if(!canWrite())return;
 
@@ -1055,7 +1061,8 @@ function openReceive(code){
   $("#rc-unit").textContent=it.unit;
   $("#rc-qty").value=base||"";
   $("#rc-amt").value="";
-  $("#rc-cost-hint").textContent=`目前帳上成本 ${it.cost}/${it.unit}。填了金額會用移動平均更新，不填就維持原樣。`;
+  $("#rc-cost-hint").textContent = isManager()
+    ? `目前帳上成本 ${it.cost}/${it.unit}。填了金額會用移動平均更新，不填就維持原樣。` : "";
   $("#modal-receive").classList.remove("hidden");
 }
 async function submitReceive(){
@@ -1065,7 +1072,7 @@ async function submitReceive(){
   const it=items.find(i=>i.code===receiveCode); if(!it)return;
   it.bal+=q;
   // 選填的總金額換算成單價。不填就傳 null，後端不會動成本。
-  const amt=parseFloat($("#rc-amt").value);
+  const amt = isManager() ? parseFloat($("#rc-amt").value) : NaN;
   const unitCost=(amt>0&&q>0)?Math.round(amt/q*10000)/10000:null;
   const sent=await push("erp_log_move",{
     p_id:uuid(),p_code:it.code,p_kind:"receive",p_qty:q,p_note:"叫貨到貨",
