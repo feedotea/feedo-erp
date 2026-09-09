@@ -267,7 +267,7 @@ select.txt-input{appearance:none;-webkit-appearance:none}
 
 <!-- 記一筆 (物料) -->
 <div class="screen hidden" id="scr-log">
-  <div class="sec-eyebrow">記一筆 物料進貨 / 用量</div>
+  <div class="sec-eyebrow">物料進出</div>
   <div class="card card-pad">
     <div class="field"><label>類型</label>
       <div class="seg" id="log-type"><button class="on" data-t="用量">用量</button><button data-t="進貨">進貨</button></div></div>
@@ -275,6 +275,13 @@ select.txt-input{appearance:none;-webkit-appearance:none}
       <div id="log-hint" style="font-size:11px;color:var(--grey);margin-top:8px;letter-spacing:.3px"></div></div>
     <div class="field"><label>數量 <span id="log-unit" style="color:var(--ink)"></span></label>
       <input class="num-input" id="log-qty" type="number" inputmode="decimal" placeholder="0"></div>
+    <div class="field" id="log-cost-box" style="display:none;margin-bottom:0">
+      <label>這批多少錢<small style="color:var(--grey);font-weight:400"> · 選填</small></label>
+      <input class="num-input" id="log-amt" type="number" inputmode="decimal" placeholder="出貨單上的金額">
+      <div style="font-size:11px;color:var(--grey);margin-top:6px;line-height:1.5">
+        臨時採購不會結掉「等貨中」的單，那個要從叫貨頁按「✓ 到貨」。
+      </div>
+    </div>
   </div><div class="scroll-hint"></div>
 </div>
 
@@ -567,7 +574,7 @@ function applyRole(){
   const mgr = isManager();
   // 店員只有「今天」一種模式，一顆按鈕的切換列沒有意義，整條收掉
   $("#modebar").style.display    = mgr ? "" : "none";
-  $("#btn-stocktake").style.display = mgr ? "" : "none";
+  updateLogCostBox();
   $("#mode-money").style.display = mgr ? "" : "none";
   $("#st-val-box").style.display = mgr ? "" : "none";   // 庫存總值 = 成本資訊
   // 每天的營業額和進貨單價都是錢，店員不該看到
@@ -934,7 +941,11 @@ function renderLog(){
 $("#log-type").addEventListener("click",e=>{if(e.target.dataset.t){logState.type=e.target.dataset.t;logState.code=null;
   [...$("#log-type").children].forEach(b=>b.classList.toggle("on",b.dataset.t===logState.type));
   $("#log-submit-btn").textContent=logState.type==="進貨"?"記錄進貨":"記錄用量";
-  $("#log-unit").textContent="";renderLog();}});
+  $("#log-unit").textContent="";renderLog();updateLogCostBox();}});
+function updateLogCostBox(){
+  const box=$("#log-cost-box"); if(!box)return;
+  box.style.display=(logState.type==="進貨"&&isManager())?"block":"none";
+}
 async function submitLog(){
   if(!canWrite())return;
   const q=parseFloat($("#log-qty").value);
@@ -942,11 +953,16 @@ async function submitLog(){
   const it=items.find(i=>i.code===logState.code);
   const receiving=logState.type==="進貨";
   it.bal=Math.max(0,it.bal+(receiving?q:-q));
+  const amt=(receiving&&isManager())?parseFloat($("#log-amt").value):NaN;
+  const unitCost=(amt>0&&q>0)?Math.round(amt/q*10000)/10000:null;
   const sent=await push("erp_log_move",{
-    p_id:uuid(),p_code:it.code,p_kind:receiving?"receive":"use",p_qty:q,p_note:"",p_date:localDate()});
-  // 進貨 = 貨到了，解除等貨中（後端也會同步結掉那張單）
-  if(receiving) orderedCodes=orderedCodes.filter(c=>c!==it.code);
-  $("#log-qty").value="";renderInv();renderOrder();refreshSummary();
+    p_id:uuid(),p_code:it.code,p_kind:receiving?"receive":"use",p_qty:q,
+    p_note:receiving?"臨時進貨":"",p_date:localDate(),
+    p_unit_cost:unitCost,
+    // 這裡是臨時採購，不能結掉廠商那張單 —— 那是叫貨頁「✓ 到貨」的事
+    p_close_order:false});
+  $("#log-qty").value="";$("#log-amt").value="";
+  renderInv();renderOrder();refreshSummary();
   toast(`${it.name} ${logState.type} ${q}${it.unit}`+(sent?"":"　⚠ 待同步"));
   if(sent)resyncIfClean();
 }
@@ -1071,7 +1087,7 @@ async function submitReceive(){
   const unitCost=(amt>0&&q>0)?Math.round(amt/q*10000)/10000:null;
   const sent=await push("erp_log_move",{
     p_id:uuid(),p_code:it.code,p_kind:"receive",p_qty:q,p_note:"叫貨到貨",
-    p_date:localDate(),p_unit_cost:unitCost});
+    p_date:localDate(),p_unit_cost:unitCost,p_close_order:true});
   orderedCodes=orderedCodes.filter(c=>c!==it.code);
   pendingOrders=pendingOrders.filter(o=>o.item_code!==it.code);
   closeModal('receive');
@@ -1691,7 +1707,7 @@ async function deleteRevenue(date){
 /* 分頁按「多久做一次」分，不是按「是庫存還是帳務」。
    舊的分法把每天要做的事散在兩個模式裡，每月一次的也散在兩邊，
    所以會一直來回切。 */
-const STOCK_TABS=[["brew","🍵","煮茶"],["order","⚑","叫貨"],["log","✎","用量"],["inv","▦","庫存"]];
+const STOCK_TABS=[["brew","🍵","煮茶"],["order","⚑","叫貨"],["log","⇅","進出"],["inv","▦","庫存"]];
 /* 帳務只留真正是「帳」的三格。
    盤點是庫存作業，搬回庫存頁；每日營收清單併進報表頁。 */
 const MONEY_TABS=[["report","▤","報表"],["expense","✎","開銷"],["recon","☰","月結"]];

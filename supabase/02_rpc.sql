@@ -128,6 +128,7 @@ end $$;
 -- create or replace 遇到不同簽章是「新增一個多載」而不是取代，
 -- 舊的那個會留著而且完全忽略單價，所以一定要先砍掉。
 drop function if exists erp_log_move(uuid, text, text, numeric, text, date);
+drop function if exists erp_log_move(uuid, text, text, numeric, text, date, numeric);
 
 create or replace function erp_log_move(
   p_id   uuid,
@@ -136,7 +137,10 @@ create or replace function erp_log_move(
   p_qty  numeric,       -- 一律填正數，方向由 p_kind 決定
   p_note text default '',
   p_date date default null,
-  p_unit_cost numeric default null   -- 進貨才有意義；月結拿不到價格就留 null
+  p_unit_cost numeric default null,  -- 進貨才有意義；月結拿不到價格就留 null
+  -- 只有「叫貨頁按到貨」才該把等貨中的單結掉。
+  -- 臨時去別家買一斤應急，不該讓松霖那張單變成已到貨。
+  p_close_order boolean default false
 ) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
@@ -162,10 +166,12 @@ begin
   get diagnostics ins = row_count;   -- 0 = 這筆已經寫過了（離線佇列重送）
 
   if p_kind = 'receive' then
-    -- 進貨 = 貨到了，把等貨中的單結掉
-    update erp_orders
-       set status = 'received', received_on = d
-     where item_code = p_code and status = 'pending';
+    -- 這批是不是那張單的貨，只有前端知道，所以用旗標而不是自己猜
+    if p_close_order then
+      update erp_orders
+         set status = 'received', received_on = d
+       where item_code = p_code and status = 'pending';
+    end if;
 
     -- 有報價才動成本，用移動平均：(舊庫存×舊成本 + 進貨量×進貨單價) / 總量
     -- 直接覆蓋成最新價會讓舊庫存的成本憑空跳動，毛利就不準了。
@@ -197,8 +203,11 @@ create or replace function erp_stocktake(p_rows jsonb, p_date date default null)
 returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
-  -- 盤點會直接改庫存數字，也是最容易掩蓋短少的動作，限店長
-  uid   uuid := erp_require_manager();
+  -- 盤點開放給店員：實際去數貨的是工讀生，鎖成店長等於沒人能盤。
+  -- 控制改成「事後看得到」而不是「事前擋住」——每筆調整都記
+  -- created_by 和「系統 X → 實際 Y」的差額，店長查得到是誰在什麼
+  -- 時候調了多少。小店的規模，偵測比審批實際。
+  uid   uuid := erp_require_staff();
   d     date := coalesce(p_date, erp_today());
   r     jsonb;
   cur   numeric;
