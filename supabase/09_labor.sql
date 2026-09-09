@@ -121,6 +121,19 @@ begin
     from ob where paid_at is not null
     group by 1, 2
   ),
+  /* 產能不能用猜的。
+     系統知道你「單一小時最多做過幾杯」，店裡知道「那個小時幾個人」——
+     兩個相除就是實測產能。比任何業界平均都準，因為用的是你的品項、
+     你的機器、你的人。
+
+     max 是單一最高（可能是特例），typ 是每天最高值的中位數（比較
+     代表得了平常的尖峰）。排班用 typ，看極限用 max。 */
+  hcup as (
+    select sales_on, extract(hour from paid_at)::int as h,
+           count(*) as orders, sum(n_drinks) as cups
+    from ob where paid_at is not null group by 1, 2
+  ),
+  dpeak as (select sales_on, max(cups) as c from hcup group by 1),
   bands as (
     select case
              when total <  50 then '未滿 $50'
@@ -174,6 +187,12 @@ begin
       select coalesce(jsonb_agg(jsonb_build_object(
         'n', n, 'orders', orders, 'amount', amount) order by n), '[]'::jsonb)
       from sizes),
+    -- 實測產能的分子。分母（那個小時幾個人）只有店裡知道，是設定值。
+    'peak', (
+      select jsonb_build_object('cups', cups, 'orders', orders,
+                                'h', h, 'date', sales_on)
+      from hcup order by cups desc, sales_on desc limit 1),
+    'peak_typ', (select round(percentile_cont(0.5) within group (order by c)) from dpeak),
     'mds_lift', (
       select jsonb_build_object(
         'with_n',      count(*) filter (where has_mds),

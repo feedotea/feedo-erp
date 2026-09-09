@@ -17,8 +17,30 @@
 | 7 | `07_ordering.sql` | 叫貨改用到貨天數（`lead_days`/`cover_days`、在途量） |
 | 8 | `08_orders.sql` | 逐筆訂單（時段分析、單筆訂單分析） |
 | 9 | `09_labor.sql` | 設定表 `erp_settings` + 逐時段逐星期出杯量（人力估算） |
+| 10 | `10_orders_fix.sql` | 訂單編號會重複，改成每日快照不做 upsert |
 
 順序不能顛倒（03 要先有 01、02 建立的物件才收得掉權限）。
+
+### 貼進 SQL Editor 時的編碼陷阱
+
+用 `pbcopy` 把檔案送到剪貼簿再貼進 Supabase 的編輯器時，**一定要指定
+UTF-8 locale**：
+
+```bash
+LC_ALL=en_US.UTF-8 pbcopy < supabase/06_analytics.sql
+```
+
+少了 `LC_ALL`，macOS 會把剪貼簿標成 MacRoman，中文字串貼進瀏覽器
+就變成亂碼。這種錯不會報錯 —— SQL 照樣建得起來，只是
+`m.category = '周邊'` 永遠比不中，過濾靜靜地失效。
+`erp_analytics` 和 `erp_order_analytics` 就這樣壞過一次。
+
+驗法（純 ASCII，不受影響）：
+
+```sql
+select proname, prosrc like '%'||chr(21608)||chr(37002)||'%' as ok_zhoubian
+from pg_proc where proname like 'erp_%';
+```
 
 ## 建立第一個帳號
 

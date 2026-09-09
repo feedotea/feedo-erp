@@ -2437,8 +2437,8 @@ function buildInsights(a){
     const gap=cw-lp.week, pct=Math.round(gap/lp.week*100);
     if(pct>=25){
       add("warn",`人力比「做得完」多了 ${pct}%`,
-        `出杯量算下來一週需要 ${Math.round(lp.week)} 人時，目前排 ${Math.round(cw)} 人時，
-         多 ${Math.round(gap)} 人時、約 ${money(gap*num(labor.wage)*4.33)}／月。
+        `依你的實測產能（一人一小時 ${lp.cph} 杯）算，一週需要 ${Math.round(lp.week)} 人時，
+         目前排 ${Math.round(cw)} 人時，多 ${Math.round(gap)} 人時、約 ${money(gap*num(labor.wage)*4.33)}／月。
          最忙的星期${WDAY[lp.rows[0].dow]}尖峰也只要 ${lp.rows[0].peak} 個人。`,
         `每月 ${money(gap*num(labor.wage)*4.33)}`,
         `先別急著砍人 —— 這個差要留給新人、教育訓練、補貨、臨時請假。
@@ -2476,12 +2476,26 @@ function buildInsights(a){
    兩者的差就是彈性：新人、教育訓練、客訴、補貨、臨時狀況。
    所以下面一律講「下限」，不講「你應該排幾人」。
    --------------------------------------------------------------- */
-let labor={cups_per_hour:45, min_staff:1, prep_hours:2, wage:200, current_week_hours:0};
+let labor={peak_staff:3, max_staff:3, min_staff:1, prep_hours:2, wage:200, current_week_hours:0};
+/* 一人一小時幾杯 = 你單小時最高做過幾杯 ÷ 那個小時幾個人。
+   不叫店長憑印象填一個數字 —— 憑印象填出來的班表沒人敢照排。
+   用「每天最高值的中位數」而不是單一最高：最高那一次可能是特例，
+   中位數才代表得了平常的尖峰。 */
+function cupsPerHour(os){
+  // 分子分母要配對：最忙的那一小時，配當時的最高人力。
+  // 拿「平常的尖峰」去除「尖峰人數」會低估 —— 平常那天本來就沒排滿。
+  const base=num(os&&os.peak&&os.peak.cups);
+  const n=Math.max(1,num(labor.peak_staff));
+  if(!base) return null;
+  return Math.max(1, Math.round(base/n));
+}
 
 function laborPlan(os){
   const hd=(os&&os.hours_dow)||[];
   if(!hd.length) return null;
-  const cph=Math.max(1,num(labor.cups_per_hour));
+  const cph=cupsPerHour(os);
+  if(!cph) return null;
+  const cap=Math.max(1,num(labor.max_staff));
   const byDow={};
   hd.forEach(x=>{
     const d=x.dow;
@@ -2492,16 +2506,19 @@ function laborPlan(os){
     g.hours.sort((a,b)=>a.h-b.h);
     g.plan=g.hours.map(x=>{
       const c=num(x.cups_per_day);
-      const n=Math.max(num(labor.min_staff), Math.ceil(c/cph));
+      const want=Math.max(num(labor.min_staff), Math.ceil(c/cph));
+      // 排不出第四個人就是排不出來。超過上限的時段標出來，不要假裝排得出
+      const n=Math.min(cap, want);
+      if(want>cap) g.over=(g.over||0)+1;
       g.cups+=c; g.manHours+=n; g.peak=Math.max(g.peak,n);
-      return {h:x.h, cups:c, n};
+      return {h:x.h, cups:c, n, tight:want>cap};
     });
     g.prep=num(labor.prep_hours)*Math.max(1,num(labor.min_staff));
     g.total=g.manHours+g.prep;
     return g;
   }).sort((a,b)=>b.total-a.total);
   const week=rows.reduce((s,r)=>s+r.total,0);
-  return {rows, week, cph};
+  return {rows, week, cph, cap};
 }
 
 function renderLabor(os){
@@ -2512,8 +2529,27 @@ function renderLabor(os){
     <input class="txt-input" style="width:86px;padding:9px;text-align:center" type="number"
       inputmode="decimal" step="${step||1}" id="lb-${k}" value="${num(labor[k])}"
       onchange="saveLabor()"></div>`;
-  setBox.innerHTML=
-    fld("cups_per_hour","一人一小時幾杯","含收銀、封膜、洗杯的實際節奏")+
+  /* 產能是算出來的不是填的。這裡只問一句「那個小時幾個人」，
+     系統用實測杯數除，得到「一人一小時幾杯」。 */
+  const pk=os&&os.peak, typ=num(os&&os.peak_typ), cph=cupsPerHour(os);
+  const head = pk
+    ? `<div class="exp-cat-row" style="background:var(--news)">
+         <div style="font-size:12.5px;line-height:1.75">
+           你單小時最高做過 <b>${num(pk.cups)} 杯</b>（${pk.date} ${pk.h}:00，${num(pk.orders)} 單）。
+           平常的尖峰約 <b>${typ} 杯</b>／小時。
+           <div style="color:var(--grey);font-size:11px;margin-top:6px">
+             下面填那種時候吧台幾個人，系統就反推得出一人一小時能出幾杯。</div>
+         </div></div>`
+    : `<div class="exp-cat-row" style="background:var(--news)">
+         <div style="font-size:12px;color:var(--grey);line-height:1.7">
+           還沒有時段資料，產能算不出來。把訂單列表 CSV 匯一次就有。</div></div>`;
+  setBox.innerHTML = head +
+    fld("peak_staff","尖峰時吧台幾個人","算產能用的分母")+
+    (cph?`<div class="exp-cat-row" style="border-bottom:1px solid var(--line)">
+       <div style="font-size:12.5px">實測產能　<b style="font-size:16px">${cph} 杯</b>／人／小時
+       <div style="color:var(--grey);font-size:11px;margin-top:4px">
+         ${num(pk&&pk.cups)} 杯 ÷ ${num(labor.peak_staff)} 人。含收銀、封膜、洗杯，是實際節奏不是理論值。</div></div></div>`:"")+
+    fld("max_staff","最多排得出幾人","再忙也只有這麼多人")+
     fld("min_staff","營業中最少留幾人","再閒也不能只剩零個人顧店")+
     fld("prep_hours","每天備料收攤幾小時","煮茶、備料、打烊清洗")+
     fld("wage","時薪","算成本用")+
@@ -2566,18 +2602,28 @@ function renderLabor(os){
       <span style="font-weight:400;color:var(--grey);font-size:11px">${Math.round(g.cups)} 杯</span></span>
       <span class="amt">${Math.round(g.total)} 人時 <span class="pct">尖峰 ${g.peak} 人</span></span></div>
     <div style="font-size:11px;color:var(--grey);margin-top:5px;line-height:1.7;word-spacing:2px">
-      ${g.plan.map(p=>`<span style="white-space:nowrap">${p.h}點<b style="color:var(--ink)">${p.n}</b></span>`).join("　")}
+      ${g.plan.map(p=>`<span style="white-space:nowrap">${p.h}點<b style="color:var(--ink)">${p.n}</b>${p.tight?'<b style="color:var(--warn)">*</b>':''}</span>`).join("　")}
       　<span style="white-space:nowrap">備料 ${g.prep}</span></div>
   </div>`).join("");
 
+  const tight=plan.rows.filter(g=>g.over);
+  if(tight.length){
+    html+=`<div class="exp-cat-row"><div style="font-size:12.5px;line-height:1.75">
+      <b style="color:var(--warn)">有 ${tight.reduce((s,g)=>s+g.over,0)} 個時段需要超過 ${plan.cap} 個人</b>
+      （${tight.map(g=>"星期"+WDAY[g.dow]).join("、")}）。
+      <div style="color:var(--grey);font-size:11px;margin-top:6px">
+        那些小時是靠排隊消化的。要嘛接受等候時間，要嘛提前備杯、簡化尖峰品項。
+        標 <b style="color:var(--warn)">*</b> 的就是。</div></div></div>`;
+  }
   html+=`<div class="exp-cat-row"><div style="font-size:11px;color:var(--grey);line-height:1.7">
-    算法：那個小時的日均杯數 ÷ ${plan.cph} 杯，無條件進位，再取不低於 ${num(labor.min_staff)} 人。
+    算法：那個小時的日均杯數 ÷ ${plan.cph} 杯（你的實測產能），無條件進位，
+    再夾在 ${num(labor.min_staff)}～${plan.cap} 人之間。
     只算出杯，不含備料收攤（另外加 ${num(labor.prep_hours)} 小時／天）。</div></div>`;
   box.innerHTML=html;
 }
 
 async function saveLabor(){
-  ["cups_per_hour","min_staff","prep_hours","wage","current_week_hours"].forEach(k=>{
+  ["peak_staff","max_staff","min_staff","prep_hours","wage","current_week_hours"].forEach(k=>{
     const el=$("#lb-"+k); if(el && el.value!=="") labor[k]=Number(el.value)||0;
   });
   renderLabor(analytics&&analytics.orderStats);
@@ -2600,6 +2646,8 @@ function renderOrderStats(os){
   }
 
   const hrs=(os.hours||[]);
+  if(!hrs.length){ $("#an-hours").innerHTML=""; $("#an-hour-note").innerHTML=need; }
+  else{
   const mx=Math.max(1,...hrs.map(h=>num(h.per_day)));
   const peak=hrs.reduce((x,y)=>num(y.per_day)>num(x.per_day)?y:x,hrs[0]);
   $("#an-hours").innerHTML=hrs.map(h=>{
@@ -2619,6 +2667,7 @@ function renderOrderStats(os){
       <div style="color:var(--grey);font-size:11px;margin-top:6px">
         備茶和排班照這個抓。橫軸是幾點，數字是那個小時平均幾單（${num(os.days)} 個營業日）。</div>
     </div></div>`;
+  }
 
   const lift=os.mds_lift||{};
   const bandMax=Math.max(1,...(os.bands||[]).map(b=>num(b.orders)));
