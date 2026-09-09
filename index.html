@@ -303,6 +303,9 @@ select.txt-input{appearance:none;-webkit-appearance:none}
     <button class="mini-btn" style="flex:1" onclick="openWaste()">🗑 記損耗/報廢</button>
     <button class="mini-btn" style="flex:1" id="btn-stocktake" onclick="openStocktake()">📋 月度盤點</button>
   </div>
+  <div style="display:flex;gap:8px;margin-bottom:8px" id="btn-map-box">
+    <button class="mini-btn" style="flex:1" onclick="openPosMap()">🔗 POS 品項對應</button>
+  </div>
   <div style="display:flex;gap:8px;margin-bottom:12px">
     <button class="mini-btn" style="flex:1;border-color:var(--ink);color:var(--ink)" id="btn-new-item" onclick="openItemEdit(null)">＋ 新增品項</button>
   </div>
@@ -331,6 +334,18 @@ select.txt-input{appearance:none;-webkit-appearance:none}
     <div class="field"><label>供應商</label><input class="txt-input" id="it-supplier" placeholder="例：松霖"></div>
     <button class="btn-primary" onclick="saveItemEdit()" id="it-save-btn">新增</button>
     <button class="btn-primary" id="it-del-btn" style="background:none;color:var(--alert);border:1px solid var(--alert);margin-top:10px;display:none" onclick="deleteItemEdit()">刪除此品項</button>
+  </div>
+</div>
+
+<!-- POS 品項對應 -->
+<div class="modal-overlay hidden" id="modal-map">
+  <div class="modal-sheet">
+    <div class="modal-head"><span class="serif">POS 品項對應</span><button onclick="closeModal('map')">✕</button></div>
+    <div class="modal-note">
+      把微碧的品名接到你的庫存品項，賣一件就自動扣一件。<br>
+      <b>飲料留空</b>——茶葉走煮茶登記、紙杯封膜已經自動扣，對應了會扣兩次。
+    </div>
+    <div id="map-body"></div>
   </div>
 </div>
 
@@ -596,6 +611,7 @@ function applyRole(){
   // 每天的營業額和進貨單價都是錢，店員不該看到
   $("#rev-box").style.display     = mgr ? "" : "none";
   $("#rc-cost-box").style.display = mgr ? "" : "none";
+  $("#btn-map-box").style.display   = mgr ? "" : "none";
   $("#btn-new-item").parentElement.style.display = mgr ? "" : "none";
   $("#role-tag").textContent = mgr ? "店長" : "店員";
   if(!mgr && mode === "money") setMode("stock");
@@ -1079,6 +1095,49 @@ async function cancelOrdered(code){
   await push("erp_cancel_order",{p_code:code});
   renderOrder();
   toast("已取消「等貨中」標記");
+}
+
+/* POS 品項對應：微碧品名 → ERP 品項。
+   分類已經由營運總表自動帶入，這裡只處理「對到哪個庫存品項」。
+   按營收排序，讓店長先處理有份量的。 */
+let mapData=null;
+async function openPosMap(){
+  $("#map-body").innerHTML=`<div class="empty"><div class="t">讀取中…</div></div>`;
+  $("#modal-map").classList.remove("hidden");
+  try{
+    mapData=await callRpc("erp_pos_config",{p_source:"weiby"});
+    renderPosMap();
+  }catch(e){
+    $("#map-body").innerHTML=`<div class="empty"><div class="ic">⚠</div><div class="t">${e.message||"讀取失敗"}</div></div>`;
+  }
+}
+function renderPosMap(){
+  const box=$("#map-body");
+  const names=(mapData&&mapData.names)||[];
+  const its=(mapData&&mapData.items)||[];
+  if(!names.length){box.innerHTML=`<div class="empty"><div class="t">還沒有 POS 資料</div></div>`;return;}
+  const opts=it=>['<option value="">— 不對應 —</option>']
+    .concat(its.map(x=>`<option value="${x.code}"${x.code===it.item_code?" selected":""}>${x.name}</option>`)).join("");
+  // 有對應到的排前面比較好檢查，其餘照營收
+  box.innerHTML=names.map(n=>{
+    const amt=Number(n.amount)||0;
+    return `<div class="st-row" style="flex-wrap:wrap;gap:6px">
+      <div style="flex:1;min-width:130px">
+        <div class="nm">${n.pos_name}</div>
+        <div style="font-size:11px;color:var(--grey)">${n.category||"未分類"} · ${Number(n.qty)||0} 件${amt?" · "+money(amt):""}</div>
+      </div>
+      <select class="txt-input" style="width:150px;padding:8px;font-size:13px"
+        onchange="savePosMap('${n.pos_name.replace(/'/g,"\\'")}',this.value)">${opts(n)}</select>
+    </div>`;
+  }).join("");
+}
+async function savePosMap(posName, code){
+  try{
+    await callRpc("erp_pos_map_item",{p_pos_name:posName, p_item_code:code||null, p_ignored:false});
+    const row=(mapData.names||[]).find(x=>x.pos_name===posName);
+    if(row) row.item_code=code||null;
+    toast(code?`${posName} → 已對應`:`${posName} → 不對應`);
+  }catch(e){ toast("存檔失敗："+(e.message||e.code)); }
 }
 
 /* 到貨：叫貨頁直接按一下就入庫。

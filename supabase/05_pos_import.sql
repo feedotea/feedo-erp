@@ -190,6 +190,17 @@ begin
   ) u
   join erp_items i on i.pos_role = u.role and i.active
   where u.q > 0;
+
+  /* 有對應到 ERP 品項的（杯套、T-Shirt 這類周邊）：賣一件扣一件。
+     飲料不該對應 —— 茶葉走煮茶登記扣、紙杯封膜走上面的 pos_role，
+     對應了會變成扣兩次。對應介面預設把飲料留空。*/
+  insert into erp_stock_moves (id, item_code, kind, qty_delta, occurred_on, note, created_by)
+  select gen_random_uuid(), m.item_code, 'use', -sum(s.qty), s.sales_on, 'POS自動扣料', uid
+  from erp_pos_sales s
+  join erp_pos_item_map m on m.pos_name = s.pos_name
+  where s.sales_on = any(dates)
+    and m.item_code is not null and not m.ignored
+  group by m.item_code, s.sales_on;
  end if;   -- v_existing is null
 
   -- 營運總表的品項分析：類別、單品營收
@@ -225,22 +236,40 @@ end $$;
 -- ---------------------------------------------------------------------
 -- 匯入後的狀態：還沒對應的品項名、最近幾次匯入
 -- ---------------------------------------------------------------------
+/* 對應介面要的資料：每個 POS 品名 + 微碧分類 + 賣了多少 + 目前對到哪個 ERP 品項。
+   按營收排序，讓店長先處理有份量的（杯套佔周邊九成，飲料那些
+   大多該設「不對應」——茶葉走煮茶扣、紙杯走自動扣）。 */
 create or replace function erp_pos_config(p_source text default 'weiby')
 returns jsonb
 language plpgsql stable security definer set search_path = public as $$
 begin
   perform erp_require_manager();
   return jsonb_build_object(
-    'unmapped', (select coalesce(jsonb_agg(x order by x.qty desc), '[]'::jsonb) from (
-                   select s.pos_name as name, sum(s.qty) as qty
-                   from erp_pos_sales s
-                   left join erp_pos_item_map m on m.pos_name = s.pos_name
-                   where m.pos_name is null
-                   group by s.pos_name) x),
-    'mapped',   (select coalesce(jsonb_agg(to_jsonb(m)), '[]'::jsonb) from erp_pos_item_map m),
-    'imports',  (select coalesce(jsonb_agg(to_jsonb(i) order by i.imported_at desc), '[]'::jsonb)
-                 from (select * from erp_pos_imports
-                       order by imported_at desc limit 20) i)
+    'names', (select coalesce(jsonb_agg(jsonb_build_object(
+                 'pos_name',  x.pos_name,
+                 'category',  x.category,
+                 'qty',       x.qty,
+                 'amount',    x.amount,
+                 'item_code', x.item_code,
+                 'ignored',   x.ignored) order by x.amount desc nulls last, x.qty desc), '[]'::jsonb)
+              from (
+                select s.pos_name,
+                       max(m.category)                as category,
+                       sum(s.qty)                     as qty,
+                       max(m.item_code)               as item_code,
+                       coalesce(bool_or(m.ignored), false) as ignored,
+                       (select sum(c.amount) from erp_pos_categories c
+                         where c.pos_name = s.pos_name) as amount
+                from erp_pos_sales s
+                left join erp_pos_item_map m on m.pos_name = s.pos_name
+                group by s.pos_name
+              ) x),
+    'items', (select coalesce(jsonb_agg(jsonb_build_object(
+                 'code', code, 'name', name, 'cat', cat, 'unit', unit)
+                 order by cat, sort_order, code), '[]'::jsonb)
+              from erp_items where active),
+    'imports', (select coalesce(jsonb_agg(to_jsonb(i) order by i.imported_at desc), '[]'::jsonb)
+                from (select * from erp_pos_imports order by imported_at desc limit 10) i)
   );
 end $$;
 
