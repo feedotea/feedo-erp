@@ -94,6 +94,10 @@ begin
            sum(mds_unmapped)              as mds_unmapped
     from daily group by 1
   ),
+  /* 星期表現要分「最近 4 週」和「更早」兩段。
+     只給全期平均會把正在發生的事平均掉 —— 週三 8 月 262 杯、9 月 95 杯，
+     混在一起顯示 170，看起來風平浪靜，實際上已經崩了六成。
+     店長要看的是「有沒有在掉」，不是「平常大概多少」。 */
   dow as (
     select extract(dow from d)::int  as dow,
            count(*)::int             as days,
@@ -101,6 +105,12 @@ begin
            round(avg(cups))          as avg_cups,
            round(avg(orders))        as avg_orders,
            sum(revenue)              as revenue,
+           count(*) filter (where d >  d_to - 28)::int as recent_days,
+           round(avg(cups)    filter (where d >  d_to - 28)) as recent_cups,
+           round(avg(revenue) filter (where d >  d_to - 28)) as recent_revenue,
+           count(*) filter (where d <= d_to - 28)::int as prev_days,
+           round(avg(cups)    filter (where d <= d_to - 28)) as prev_cups,
+           round(avg(revenue) filter (where d <= d_to - 28)) as prev_revenue,
            count(*) filter (where has_cat)::int as cat_days,
            round(avg(mds_amount) filter (where has_cat))      as avg_mds,
            round(avg(mds_qty)    filter (where has_cat), 1)   as avg_mds_qty,

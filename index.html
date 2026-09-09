@@ -2367,7 +2367,25 @@ function buildInsights(a){
     }
   }
 
-  /* 4. 一週的忙閒差。排班和備茶量該照這個走，不是照直覺。 */
+  /* 4. 哪幾天正在掉。
+     這條要排在很前面 —— 掉單是會複利的，愈晚發現愈難拉回來。
+     只比同一個星期幾，不然週六跟週三比毫無意義。 */
+  const slide=dow.filter(d=>num(d.recent_days)>=2 && num(d.prev_days)>=3 && num(d.prev_cups)>0)
+    .map(d=>({...d, pct:Math.round((num(d.recent_cups)/num(d.prev_cups)-1)*100)}))
+    .filter(d=>d.pct<=-20).sort((x,y)=>x.pct-y.pct);
+  if(slide.length){
+    const worst=slide[0];
+    const lost=slide.reduce((s,d)=>s+(num(d.prev_cups)-num(d.recent_cups)),0);
+    add("risk",`星期${slide.map(d=>WDAY[d.dow]).join("、")}的杯數正在掉`,
+      slide.map(d=>`星期${WDAY[d.dow]} ${num(d.prev_cups)} → <b>${num(d.recent_cups)}</b> 杯（${d.pct}%）`).join("；")
+      +`。這是最近 28 天跟更早的比較，同一個星期幾對同一個星期幾。`,
+      `一週少 ${Math.round(lost)} 杯`,
+      `先確認是不是季節或開學造成的 —— 如果是，那是每年都會來的，要有平日的做法。
+       等時段資料進來就看得出是「整天都少」還是「某個時段空掉」：
+       整天少是客源問題，單一時段空是留客問題，兩個對策完全不同。`);
+  }
+
+  /* 5. 一週的忙閒差。排班和備茶量該照這個走，不是照直覺。 */
   if(dow.length>=5){
     const hi=dow.reduce((x,y)=>num(y.avg_revenue)>num(x.avg_revenue)?y:x);
     const lo=dow.reduce((x,y)=>num(y.avg_revenue)<num(x.avg_revenue)?y:x);
@@ -2380,7 +2398,7 @@ function buildInsights(a){
     }
   }
 
-  /* 5. 集中度：少數品項撐營收 = 缺料風險，安全庫存要分等級。 */
+  /* 6. 集中度：少數品項撐營收 = 缺料風險，安全庫存要分等級。 */
   const its=(a.items||[]);
   if(its.length>=8){
     const tot=(a.cat_total||[]).reduce((s,c)=>s+num(c.amount),0)
@@ -2392,7 +2410,7 @@ function buildInsights(a){
               : "分佈算平均，沒有壓在單一品項上的風險。");
   }
 
-  /* 6. 退燒品項。菜單每留一項就多一種料要備、要顧新鮮度。 */
+  /* 7. 退燒品項。菜單每留一項就多一種料要備、要顧新鮮度。 */
   const fade=(a.fading||[]);
   if(fade.length){
     add("warn",`${fade.length} 個品項這 30 天幾乎沒人點`,
@@ -2400,7 +2418,7 @@ function buildInsights(a){
       "確認不是季節性的話就下架。每留一項就多一種料要備、要顧新鮮度，也多一格佔菜單版面。");
   }
 
-  /* 7. 甜度冰塊：預設值設對，出杯少按兩下；備料也照這個比例抓。 */
+  /* 8. 甜度冰塊：預設值設對，出杯少按兩下；備料也照這個比例抓。 */
   const sw=(a.options||[]).filter(o=>o.kind==="sweet");
   const ic=(a.options||[]).filter(o=>o.kind==="ice");
   if(sw.length&&ic.length){
@@ -2411,7 +2429,7 @@ function buildInsights(a){
       `POS 預設值設成 ${eh(sw[0].name)}／${eh(ic[0].name)}，點單少按兩下；糖量備料照這個比例抓。`);
   }
 
-  /* 8. 人力。只有店長填了目前排班才比得出來 —— 沒有那個數字，
+  /* 9. 人力。只有店長填了目前排班才比得出來 —— 沒有那個數字，
      講「需求 62 人時」對他來說沒有意義。 */
   const lp=laborPlan(a.orderStats);
   const cw=num(labor.current_week_hours);
@@ -2434,7 +2452,7 @@ function buildInsights(a){
     }
   }
 
-  /* 9. 資料缺口。這些沒補，上面的毛利就只是「毛利」，不是淨利。 */
+  /* 10. 資料缺口。這些沒補，上面的毛利就只是「毛利」，不是淨利。 */
   const gaps=[];
   if(!expenses.length) gaps.push("開銷一筆都沒記（房租、水電、人事）");
   // 有品項是負庫存，代表 POS 一直在扣、卻沒有起始數量 —— 一樣是沒盤過
@@ -2680,14 +2698,24 @@ function renderAnalysis(){
   const seen=new Set(dw.map(d=>d.dow));
   const off=[0,1,2,3,4,5,6].filter(d=>!seen.has(d));
   const bestRev=Math.max(0,...dw.map(d=>num(d.avg_revenue)));
-  $("#an-dow").innerHTML=`<tr><th>星期</th><th>日均營收</th><th>日均杯</th><th>日均周邊</th><th>周邊</th></tr>`+
-    dw.slice().sort((x,y)=>num(y.avg_revenue)-num(x.avg_revenue)).map(d=>
-      `<tr class="${num(d.avg_revenue)===bestRev?"best":""}">
+  /* 近 4 週 vs 更早。全期平均會把正在發生的事平均掉 ——
+     週三 8 月 262 杯、9 月 95 杯，混起來顯示 170，看起來風平浪靜。 */
+  const hasSplit=dw.some(d=>num(d.recent_days)>0 && num(d.prev_days)>0);
+  $("#an-dow").innerHTML=`<tr><th>星期</th><th>${hasSplit?"近4週杯":"日均杯"}</th>${hasSplit?"<th>對比</th>":""}<th>日均營收</th><th>周邊</th></tr>`+
+    dw.slice().sort((x,y)=>num(y.avg_revenue)-num(x.avg_revenue)).map(d=>{
+      const rc=num(d.recent_cups), pc=num(d.prev_cups);
+      const pct=(hasSplit&&pc>0&&num(d.recent_days)>0)?Math.round((rc/pc-1)*100):null;
+      const col=pct==null?"":(pct<=-20?"var(--alert)":pct<=-8?"var(--warn)":pct>=8?"var(--ok)":"var(--grey)");
+      return `<tr class="${num(d.avg_revenue)===bestRev?"best":""}">
         <td class="hi">星期${WDAY[d.dow]}<div class="sub">${d.days} 天</div></td>
-        <td class="hi">${money(d.avg_revenue)}</td><td>${num(d.avg_cups)}</td>
-        <td>${d.cat_days?money(d.avg_mds):"—"}</td>
-        <td>${d.mds_pct!=null?d.mds_pct+"%":"—"}</td></tr>`).join("")
-    + (off.length?`<tr><td colspan="5" style="text-align:left;color:var(--grey)">星期${off.map(d=>WDAY[d]).join("、")}沒有營業紀錄</td></tr>`:"");
+        <td class="hi">${hasSplit?(num(d.recent_days)?rc:"—"):num(d.avg_cups)}
+          ${hasSplit&&pc?`<div class="sub">之前 ${pc}</div>`:""}</td>
+        ${hasSplit?`<td style="color:${col};font-weight:700">${pct==null?"—":(pct>0?"＋":"")+pct+"%"}</td>`:""}
+        <td>${money(hasSplit&&num(d.recent_days)?d.recent_revenue:d.avg_revenue)}</td>
+        <td>${d.mds_pct!=null?d.mds_pct+"%":"—"}</td></tr>`;
+    }).join("")
+    + (off.length?`<tr><td colspan="${hasSplit?5:4}" style="text-align:left;color:var(--grey)">星期${off.map(d=>WDAY[d]).join("、")}沒有營業紀錄</td></tr>`:"")
+    + (hasSplit?`<tr><td colspan="5" style="text-align:left;color:var(--grey);font-size:11px;line-height:1.6">「近4週杯」是最近 28 天的日均，「之前」是更早的日均。看的是有沒有在掉，不是平常大概多少。</td></tr>`:"");
 
   $("#an-items").innerHTML=`<tr><th>品項</th><th>件數</th><th>營收</th><th>毛利</th></tr>`+
     (a.items||[]).slice(0,12).map(i=>{
