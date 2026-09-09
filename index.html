@@ -544,6 +544,8 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   <div class="sec-eyebrow">時段 · 幾點忙</div>
   <div class="card"><div class="trend" id="an-hours" style="height:118px"></div></div>
   <div class="card" id="an-hour-note" style="padding:0"></div>
+  <div class="sec-eyebrow">活動對比</div>
+  <div class="card" id="an-camp"></div>
   <div class="sec-eyebrow">人力估算</div>
   <div class="card" id="an-labor-set"></div>
   <div class="card" id="an-labor"></div>
@@ -2298,6 +2300,7 @@ async function loadAnalytics(force){
         console.warn("設定讀取失敗",e); return null; })
     ]);
     if(st && st.labor) labor={...labor, ...st.labor};
+    if(st && Array.isArray(st.campaigns)) campaigns=st.campaigns;
     if(want!==anMonths)return;          // 期間又被切走了，這份結果已經過時
     r.orderStats=ord;
     analytics=r; anAt=Date.now();
@@ -2749,6 +2752,112 @@ function renderOrderStats(os){
   renderLabor(os);
 }
 
+/* ---------------------------------------------------------------
+   活動對比
+   「這個活動有沒有效」很難答，因為活動期間店裡什麼都在變。
+   這裡只做一件誠實的事：拿活動期間對比緊接在前面等長的日子，
+   並且把基準期的日期寫出來 —— 只給一個百分比是不負責任的，
+   看的人要能自己判斷那段時間本來就在漲還是在跌。
+   --------------------------------------------------------------- */
+let campaigns=[], campRes=null, campBusy=false;
+
+function renderCamp(){
+  const box=$("#an-camp");
+  const list=campaigns.map((c,i)=>`<div class="exp-cat-row" style="display:flex;align-items:center;gap:8px">
+    <div style="flex:1;min-width:0">
+      <div class="nm">${eh(c.name)}</div>
+      <div style="font-size:11px;color:var(--grey)">${c.from} ～ ${c.to}${c.item?" · 主打 "+eh(c.item):""}</div>
+    </div>
+    <button class="mini-btn" style="padding:7px 10px;font-size:11px" onclick="runCamp(${i})">看成效</button>
+    <button class="brew-undo" style="font-size:14px" onclick="dropCamp(${i})" title="刪除">✕</button>
+  </div>`).join("");
+
+  const form=`<div class="exp-cat-row">
+    <div style="font-size:10px;letter-spacing:2.5px;color:var(--grey);margin-bottom:8px">新增活動</div>
+    <input class="txt-input" id="cp-name" placeholder="活動名稱，例：七夕貼紙" style="margin-bottom:6px">
+    <div style="display:flex;gap:6px;margin-bottom:6px">
+      <input class="txt-input" id="cp-from" type="date" style="flex:1">
+      <input class="txt-input" id="cp-to" type="date" style="flex:1">
+    </div>
+    <div style="display:flex;gap:6px">
+      <input class="txt-input" id="cp-item" placeholder="主打商品關鍵字（可空）" style="flex:1">
+      <button class="mini-btn" style="padding:0 14px" onclick="addCamp()">加入</button>
+    </div>
+  </div>`;
+
+  box.innerHTML=(list||`<div class="exp-cat-row"><div style="font-size:12px;color:var(--grey);line-height:1.7">
+    還沒記錄任何活動。做過的活動填進來，就能跟活動前等長的日子比。</div></div>`)+form+campBody();
+}
+
+function campBody(){
+  const r=campRes; if(!r) return "";
+  const cur=r.cur||{}, base=r.base||{};
+  const pd=(o,k)=>num(o.days)?num(o[k])/num(o.days):0;
+  const cmp=(k,label,fmt)=>{
+    const c=pd(cur,k), b=pd(base,k);
+    const pct=b?Math.round((c/b-1)*100):null;
+    const col=pct==null?"var(--grey)":(pct>=10?"var(--ok)":pct<=-10?"var(--alert)":"var(--grey)");
+    return `<tr><td class="hi">${label}</td><td>${fmt(b)}</td><td class="hi">${fmt(c)}</td>
+      <td style="color:${col};font-weight:700">${pct==null?"—":(pct>0?"＋":"")+pct+"%"}</td></tr>`;
+  };
+  const n=x=>Math.round(x).toLocaleString();
+  const mv=(arr,title,up)=>arr.length?`<div class="exp-cat-row" style="background:var(--news)">
+      <span class="nm" style="font-size:10px;letter-spacing:2.5px;color:var(--grey)">${title}</span></div>`+
+    arr.slice(0,6).map(x=>`<div class="exp-cat-row"><div class="top">
+      <span class="nm">${eh(x.name)}</span>
+      <span class="amt">${x.base} → <b style="color:var(--${up?"ok":"alert"})">${x.cur}</b> 杯／天</span>
+      </div></div>`).join(""):"";
+
+  return `<div class="exp-cat-row" style="background:var(--news)">
+      <div style="font-size:12.5px;line-height:1.75">
+        <b>${eh(r.name||"活動")}</b>　${r.from} ～ ${r.to}（${num(cur.days)} 個營業日）
+        <div style="color:var(--grey);font-size:11px;margin-top:4px">
+          對比 ${r.base_from} ～ ${r.base_to}（${num(base.days)} 天）· 全部用日均比</div>
+      </div></div>
+    <div style="overflow-x:auto"><table class="mini-tbl">
+      <tr><th>每天</th><th>活動前</th><th>活動中</th><th>變化</th></tr>
+      ${cmp("revenue","營收",v=>money(v))}
+      ${cmp("orders","訂單",v=>n(v)+" 單")}
+      ${cmp("cups","飲料",v=>n(v)+" 杯")}
+      ${cmp("mds","周邊",v=>n(v)+" 件")}
+      ${r.item?cmp("target","主打 "+eh(r.item),v=>n(v)+" 杯"):""}
+    </table></div>
+    ${num(cur.gifts)?`<div class="exp-cat-row"><div style="font-size:12px;color:var(--grey);line-height:1.7">
+      活動期間送出贈品 <b style="color:var(--ink)">${n(num(cur.gifts))}</b> 件。這是成本，不算營收。</div></div>`:""}
+    ${mv(r.up||[],"賣更多的","up")}
+    ${mv(r.down||[],"賣更少的","")}
+    <div class="exp-cat-row"><div style="font-size:11px;color:var(--grey);line-height:1.7">
+      ⚠ 這個比較排得掉星期組成，排不掉季節。基準期的日子寫在上面 ——
+      如果那段時間本來就在漲或在跌，變化的一部分不是活動造成的。</div></div>`;
+}
+
+async function runCamp(i){
+  const c=campaigns[i]; if(!c||campBusy)return;
+  campBusy=true;
+  try{
+    const r=await callRpc("erp_campaign_report",{p_from:c.from,p_to:c.to,p_item:c.item||null});
+    campRes={...r, name:c.name}; renderCamp();
+    $("#an-camp").scrollIntoView({block:"nearest"});
+  }catch(e){ toast("讀取失敗："+(e.message||e.code)); }
+  finally{ campBusy=false; }
+}
+async function addCamp(){
+  const name=$("#cp-name").value.trim(), from=$("#cp-from").value, to=$("#cp-to").value;
+  const item=$("#cp-item").value.trim();
+  if(!name||!from||!to){toast("名稱和起迄日期都要填");return;}
+  if(to<from){toast("結束日不能早於開始日");return;}
+  campaigns.push({name,from,to,item});
+  await saveCamps(); renderCamp();
+}
+async function dropCamp(i){
+  campaigns.splice(i,1); campRes=null;
+  await saveCamps(); renderCamp();
+}
+async function saveCamps(){
+  try{ await callRpc("erp_set_setting",{p_key:"campaigns",p_value:campaigns}); }
+  catch(e){ toast("活動沒存到雲端："+(e.message||e.code)); }
+}
+
 $("#an-seg").addEventListener("click",e=>{if(e.target.dataset.v)setAnMonths(+e.target.dataset.v);});
 
 function renderAnalysis(){
@@ -2833,6 +2942,7 @@ function renderAnalysis(){
     : `<div class="empty"><div class="ic">—</div><div class="t">沒有選項資料</div></div>`;
 
   renderOrderStats(a.orderStats);
+  renderCamp();
 
   const fade=(a.fading||[]);
   $("#an-fading").innerHTML=fade.length

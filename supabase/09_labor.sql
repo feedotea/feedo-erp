@@ -80,11 +80,16 @@ begin
   /* 每張單買了幾件、有沒有買周邊。
      「有買周邊的單值多少」是這頁最有用的一個數字 —— 有具體差額，
      才說得動店員在結帳時開口。 */
+  /* 贈品不是銷售。
+     活動送的貼紙在 POS 是一個 options='贈品' 的品項，分類跟著品名
+     掛在「周邊」下 —— 不排掉的話，領贈品的客人會被算成「有買周邊」，
+     周邊件數也會被灌水。加購的（客人付錢買）才算。 */
   li as (
     select s.sales_on, s.order_no,
-           sum(s.qty) as n_items,
-           bool_or(m.category = '周邊') as has_mds,
-           sum(s.qty) filter (where coalesce(m.category,'') not in ('周邊','袋子')) as n_drinks
+           sum(s.qty) filter (where s.options not like '%贈品%') as n_items,
+           bool_or(m.category = '周邊' and s.options not like '%贈品%') as has_mds,
+           sum(s.qty) filter (where coalesce(m.category,'') not in ('周邊','袋子')) as n_drinks,
+           sum(s.qty) filter (where s.options like '%贈品%') as n_gifts
     from erp_pos_sales s
     left join erp_pos_item_map m on m.pos_name = s.pos_name
     where s.sales_on >= d_from
@@ -100,7 +105,8 @@ begin
                 else coalesce(li.n_items, 0) end   as n_items,
            case when li.order_no is null then o.items
                 else coalesce(li.n_drinks, 0) end  as n_drinks,
-           coalesce(li.has_mds, false)             as has_mds
+           coalesce(li.has_mds, false)             as has_mds,
+           coalesce(li.n_gifts, 0)                 as n_gifts
     from o left join li on li.sales_on = o.sales_on and li.order_no = o.order_no
   ),
   -- 有付款時間的營業日數。時段的「日均」要除這個，不是除有那小時的天數
@@ -211,7 +217,13 @@ begin
         'without_n',     count(*) filter (where not has_mds),
         'without_avg',   round(avg(total)    filter (where not has_mds)),
         'without_drinks',round(avg(n_drinks) filter (where not has_mds), 2))
-      from ob where n_items > 0)
+      from ob where n_items > 0),
+    -- 活動贈品：送出去幾件、幾張單領過。是成本不是營收
+    'gifts', (
+      select jsonb_build_object(
+        'qty',    coalesce(sum(n_gifts), 0),
+        'orders', count(*) filter (where n_gifts > 0))
+      from ob)
   ) into v_out;
 
   return v_out;

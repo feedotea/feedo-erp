@@ -18,6 +18,7 @@
 | 8 | `08_orders.sql` | 逐筆訂單（時段分析、單筆訂單分析） |
 | 9 | `09_labor.sql` | 設定表 `erp_settings` + 逐時段逐星期出杯量（人力估算） |
 | 10 | `10_orders_fix.sql` | 訂單編號會重複，改成每日快照不做 upsert |
+| 11 | `11_campaign.sql` | 活動期間對比（`erp_campaign_report`） |
 
 順序不能顛倒（03 要先有 01、02 建立的物件才收得掉權限）。
 
