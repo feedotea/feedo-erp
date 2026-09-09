@@ -428,6 +428,29 @@ begin
     'cogs',     (select coalesce(sum(-m.qty_delta * i.cost), 0)
                  from erp_stock_moves m join erp_items i on i.code = m.item_code
                  where m.kind in ('brew','use') and m.qty_delta < 0
-                   and m.occurred_on >= m_start and m.occurred_on < m_end)
+                   and m.occurred_on >= m_start and m.occurred_on < m_end),
+
+    /* POS 營運數字。
+       「哪些算飲料」目前用推斷：有甜度或冰塊選項、或品名含茶/烏龍。
+       這樣杯套、T-Shirt、帽子、貼紙、紙袋、兩杯袋不會被算進杯數，
+       而沒有甜冰選項的維也納奶茶還是算得到。
+       等 erp_pos_item_map 對應完就改用正式分類。 */
+    'pos',      (select jsonb_build_object(
+                   'orders', count(distinct order_no),
+                   'cups',   coalesce(sum(qty) filter (where is_drink), 0),
+                   'others', coalesce(sum(qty) filter (where not is_drink), 0),
+                   'eco',    coalesce(sum(qty) filter (where options like '%環保杯%'), 0),
+                   'film',   coalesce(sum(qty) filter (where options like '%封膜%'), 0))
+                 from (select order_no, qty, options,
+                              (options ~ '甜|冰' or pos_name ~ '茶|烏龍') as is_drink
+                       from erp_pos_sales
+                       where sales_on >= m_start and sales_on < m_end) x),
+
+    'top',      (select coalesce(jsonb_agg(jsonb_build_object('name', pos_name, 'qty', q)
+                                           order by q desc), '[]'::jsonb)
+                 from (select pos_name, sum(qty) as q from erp_pos_sales
+                       where sales_on >= m_start and sales_on < m_end
+                         and (options ~ '甜|冰' or pos_name ~ '茶|烏龍')
+                       group by pos_name order by q desc limit 10) t)
   );
 end $$;

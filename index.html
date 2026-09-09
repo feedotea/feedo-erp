@@ -442,6 +442,19 @@ select.txt-input{appearance:none;-webkit-appearance:none}
     <button class="mini-btn" style="flex:1" onclick="exportCSV()">匯出 CSV</button>
     <button class="mini-btn" style="flex:1;border-color:var(--ink);color:var(--ink)" onclick="openPosImport()">⬆ 匯入微碧報表</button>
   </div>
+  <div class="sec-eyebrow">當月營運</div>
+  <div class="summary-strip">
+    <div class="stat"><div class="v serif" id="ops-cups">—</div><div class="k">杯數</div></div>
+    <div class="stat"><div class="v serif" id="ops-orders">—</div><div class="k">訂單</div></div>
+    <div class="stat"><div class="v serif" id="ops-aov">—</div><div class="k">客單價</div></div>
+  </div>
+  <div class="summary-strip">
+    <div class="stat"><div class="v serif" id="ops-percup">—</div><div class="k">每杯均價</div></div>
+    <div class="stat"><div class="v serif" id="ops-eco">—</div><div class="k">自帶環保杯</div></div>
+    <div class="stat"><div class="v serif" id="ops-others">—</div><div class="k">周邊/袋子</div></div>
+  </div>
+  <div class="sec-eyebrow">熱門品項</div>
+  <div class="card" id="top-items" style="margin-bottom:14px"></div>
   <div class="sec-eyebrow">每日營收</div>
   <div class="summary-strip">
     <div class="stat"><div class="v serif" id="rev-month-total">$0</div><div class="k">當月營收</div></div>
@@ -1308,6 +1321,30 @@ function renderReport(){
   if(mRev&&haveCogs){const profit=mRev-cogs-opex;
     const el=$("#pl-profit");el.textContent=money(profit);el.classList.toggle("neg",profit<0);
   } else $("#pl-profit").textContent=mRev?"計算中…":"待營收";
+  // 當月營運（杯數這些來自 POS，跟損益是不同來源，拿不到就留「—」）
+  const pos = haveCogs && monthReport.pos ? monthReport.pos : null;
+  const setOps=(id,v)=>{const e=$(id); if(e) e.textContent=v;};
+  if(pos){
+    const cups=Number(pos.cups)||0, ord=Number(pos.orders)||0;
+    setOps("#ops-cups", cups.toLocaleString());
+    setOps("#ops-orders", ord.toLocaleString());
+    setOps("#ops-aov", ord?money(mRev/ord):"—");
+    setOps("#ops-percup", cups?money(mRev/cups):"—");
+    setOps("#ops-eco", (Number(pos.eco)||0).toLocaleString());
+    setOps("#ops-others", (Number(pos.others)||0).toLocaleString());
+  }else{
+    ["#ops-cups","#ops-orders","#ops-aov","#ops-percup","#ops-eco","#ops-others"]
+      .forEach(id=>setOps(id,"—"));
+  }
+  const tb=$("#top-items");
+  if(tb){
+    const top=(haveCogs && monthReport.top)||[];
+    tb.innerHTML = top.length
+      ? top.map((t,i)=>`<div class="exp-item"><div class="l"><div class="n">${i+1}. ${t.name}</div></div>
+          <div class="r"><div class="a">${Number(t.qty).toLocaleString()} 杯</div></div></div>`).join("")
+      : `<div class="empty"><div class="ic">—</div><div class="t">本月尚無銷售資料</div></div>`;
+  }
+
   // breakdown
   const bd=$("#exp-breakdown");bd.innerHTML="";
   const byCat={};monthExp.forEach(e=>byCat[e.cat]=(byCat[e.cat]||0)+e.amt);
