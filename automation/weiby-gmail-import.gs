@@ -13,7 +13,8 @@
  * 3. 執行一次 run()，會跳授權視窗，允許它讀 Gmail
  *    ★ 必須用「收到微碧信的那個 Google 帳號」登入 script.google.com，
  *      也就是 feedotea@gmail.com。用別的帳號搜不到信。
- * 4. 左側「觸發條件」→ 新增 → 選 run → 時間驅動 → 分鐘計時器 → 每 15 分鐘
+ * 4. 排程不用手動設定：run() 第一次執行時會自己建立
+ *    「每 15 分鐘」的觸發條件（見 ensureTrigger）。
  *
  * ── 需要的 Supabase 帳號 ─────────────────────────────────
  * 這支程式要用一個真的帳號登入（不是 service key），
@@ -56,11 +57,26 @@ function setup() {
   ].join('\n'));
 }
 
+/* 排程自己裝。
+   Apps Script 的「新增觸發條件」對話框只能靠人手動點，
+   所以改成 run() 第一次執行時自己把排程建起來 —— 按一次 run，
+   之後就永遠自動了。 */
+function ensureTrigger() {
+  const exists = ScriptApp.getProjectTriggers()
+    .some(t => t.getHandlerFunction() === 'run');
+  if (exists) return false;
+  ScriptApp.newTrigger('run').timeBased().everyMinutes(15).create();
+  Logger.log('★ 已建立排程：每 15 分鐘自動執行 run()');
+  return true;
+}
+
 // ── 主流程 ────────────────────────────────────────────────
 function run() {
   ['url','anon','email','password'].forEach(k => {
     if (!CFG[k]) throw new Error('指令碼屬性還沒設定完，先執行 setup() 看說明');
   });
+
+  ensureTrigger();   // 沒有排程就順手建一個
 
   const label = GmailApp.getUserLabelByName(CFG.label)
              || GmailApp.createLabel(CFG.label);
