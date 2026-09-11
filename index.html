@@ -363,6 +363,12 @@ select.txt-input{appearance:none;-webkit-appearance:none}
       <div class="field" style="flex:1"><label>到貨要幾天<small style="color:var(--grey);font-weight:400"> · 下單到收到</small></label><input class="txt-input" id="it-lead" type="number" inputmode="numeric" placeholder="3"></div>
       <div class="field" style="flex:1"><label>叫一次撐幾天<small style="color:var(--grey);font-weight:400"> · 不含到貨</small></label><input class="txt-input" id="it-cover" type="number" inputmode="numeric" placeholder="14"></div>
     </div>
+    <div style="display:flex;gap:10px">
+      <div class="field" style="flex:1;margin-bottom:6px"><label>叫貨單位<small style="color:var(--grey);font-weight:400"> · 空著＝用庫存單位叫</small></label><input class="txt-input" id="it-ou" list="it-ou-list" placeholder="例：箱、卷、斤" oninput="updateOrderUnitHint()"></div>
+      <div class="field" style="flex:1;margin-bottom:6px"><label id="it-op-lab">1 叫貨單位 ＝ 幾個</label><input class="txt-input" id="it-op" type="number" inputmode="decimal" placeholder="例：1000" oninput="updateOrderUnitHint()"></div>
+    </div>
+    <datalist id="it-ou-list"><option value="箱"><option value="卷"><option value="斤"><option value="包"><option value="袋"><option value="打"></datalist>
+    <div id="it-ou-hint" style="font-size:10px;color:var(--grey);line-height:1.5;margin-bottom:16px"></div>
     <div class="field"><label>供應商</label><input class="txt-input" id="it-supplier" placeholder="例：松霖"></div>
     <button class="btn-primary" onclick="saveItemEdit()" id="it-save-btn">新增</button>
     <button class="btn-primary" id="it-del-btn" style="background:none;color:var(--alert);border:1px solid var(--alert);margin-top:10px;display:none" onclick="deleteItemEdit()">刪除此品項</button>
@@ -1603,6 +1609,11 @@ function openItemEdit(code){
   $("#it-avg").value=it?(it.avgManual??it.avgPerDay):"";
   $("#it-lead").value =it?it.leadDays:"";
   $("#it-cover").value=it?it.coverDays:"";
+  $("#it-ou").value=it&&it.orderUnit?it.orderUnit:"";
+  $("#it-op").value=it&&it.orderUnit&&it.orderPack?it.orderPack:"";
+  // 等貨中的單記的是舊單位，這時候改會讓在途量和到貨換算都錯（後端也會擋）
+  const waiting=!!(it&&orderedCodes.includes(it.code));
+  $("#it-ou").disabled=waiting; $("#it-op").disabled=waiting;
   const ah=$("#it-avg-hint");
   if(it&&it.avgIsActual){ah.style.display="block";ah.textContent=`目前已改用實際數據 ${it.avgPerDay}/天（近 28 天），手填值暫時不生效`;}
   else ah.style.display="none";
@@ -1638,6 +1649,19 @@ function openItemChips(){
   if(c) c.textContent=u?`（每 1 ${u} 多少錢）`:"（先選單位）";
   const h=$("#it-cost-help");
   if(h) h.textContent=u?(UNIT_EG[u]||`買一整箱的話：總價 ÷ 箱裡有幾${u}`):"";
+  updateOrderUnitHint();
+}
+/* 叫貨單位：廠商論箱、論卷、論斤賣，庫存卻是一個一個、一克一克記。
+   填了之後叫貨頁會寫「叫 2 箱」，到貨時自動換回庫存單位。 */
+function updateOrderUnitHint(){
+  const u=itSel.unit, ou=$("#it-ou").value.trim(), op=parseFloat($("#it-op").value);
+  $("#it-op-lab").textContent=`1 ${ou||"叫貨單位"} ＝ 幾${u||"個"}`;
+  const h=$("#it-ou-hint"); if(!h) return;
+  if($("#it-ou").disabled){h.style.color="var(--warn)";h.textContent="這項還在等貨中。按到貨或取消標記之後，才能改叫貨單位。";return;}
+  h.style.color="var(--grey)";
+  if(!ou||ou===u) h.textContent=u?`叫貨時直接用「${u}」叫。`:"";
+  else if(!(op>0)) {h.style.color="var(--alert)";h.textContent=`要填 1 ${ou} 裡有幾${u||"個"}。`;}
+  else h.textContent=`叫貨頁會寫「叫 2 ${ou}」，到貨時自動記成 ${(2*op).toLocaleString()} ${u||""}。`;
 }
 $("#it-tea").addEventListener("click",e=>{if(e.target.dataset.v){itSel.tea=e.target.dataset.v==="yes";
   [...$("#it-tea").children].forEach(b=>b.classList.toggle("on",b.dataset.v===e.target.dataset.v));}});
@@ -1650,6 +1674,10 @@ async function saveItemEdit(){
   const bal=parseFloat($("#it-bal").value)||0, safe=parseFloat($("#it-safe").value)||0;
   const cost=parseFloat($("#it-cost").value)||0, avg=parseFloat($("#it-avg").value)||0;
   const supplier=$("#it-supplier").value.trim()||"—";
+  const ouEditable=!$("#it-ou").disabled;
+  let ou=$("#it-ou").value.trim(); const op=parseFloat($("#it-op").value);
+  if(ou===itSel.unit) ou="";
+  if(ouEditable && ou && !(op>0)){toast(`填 1 ${ou} 裡有幾${itSel.unit}，或把叫貨單位清空`);return;}
 
   let code=editingCode;
   if(!code){
@@ -1663,14 +1691,17 @@ async function saveItemEdit(){
   // 主檔是設定不是流水帳，一定要即時寫進去確認，不進離線佇列
   $("#it-save-btn").textContent="儲存中…";
   try{
-    await callRpc("erp_save_item",{p_item:{
+    const p_item={
       code, name, cat:itSel.cat, unit:itSel.unit, safe_qty:safe, cost,
       supplier: supplier==="—"?null:supplier, is_tea:itSel.tea,
       pack_g: prev?prev.packG:PACK_G, avg_per_day_manual:avg, note: prev?prev.note:"",
       lead_days:  Math.max(0, parseInt($("#it-lead").value)  || (prev?prev.leadDays:3)),
       cover_days: Math.max(1, parseInt($("#it-cover").value) || (prev?prev.coverDays:14)),
       sort_order: prev?prev.sortOrder:0
-    }});
+    };
+    // 等貨中不帶這兩個 key，後端就保留原值
+    if(ouEditable){ p_item.order_unit=ou||null; p_item.order_pack=ou?op:null; }
+    await callRpc("erp_save_item",{p_item});
     // 庫存欄有動 → 寫成一筆盤點調整（庫存是帳，不能直接覆蓋數字）
     const curBal=prev?prev.bal:0;
     if(bal!==curBal){
