@@ -100,6 +100,7 @@ body{
 .txt-input,.num-input{width:100%;padding:13px 15px;border:1px solid var(--line);border-radius:2px;font-size:16px;font-family:inherit;background:var(--paper)}
 .num-input{font-size:22px;font-weight:700;text-align:center;font-variant-numeric:tabular-nums}
 .txt-input:focus,.num-input:focus{outline:none;border-color:var(--ink)}
+.txt-input:disabled{opacity:.45;cursor:not-allowed}
 
 .supplier-grp{margin-bottom:14px}
 .supplier-hd{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:var(--ink);color:var(--paper)}
@@ -365,7 +366,7 @@ select.txt-input{appearance:none;-webkit-appearance:none}
     </div>
     <div style="display:flex;gap:10px">
       <div class="field" style="flex:1;margin-bottom:6px"><label>叫貨單位<small style="color:var(--grey);font-weight:400"> · 空著＝用庫存單位叫</small></label><input class="txt-input" id="it-ou" list="it-ou-list" placeholder="例：箱、卷、斤" oninput="updateOrderUnitHint()"></div>
-      <div class="field" style="flex:1;margin-bottom:6px"><label id="it-op-lab">1 叫貨單位 ＝ 幾個</label><input class="txt-input" id="it-op" type="number" inputmode="decimal" placeholder="例：1000" oninput="updateOrderUnitHint()"></div>
+      <div class="field" style="flex:1;margin-bottom:6px"><label id="it-op-lab" style="text-transform:none">1 叫貨單位 ＝ 幾個</label><input class="txt-input" id="it-op" type="number" inputmode="decimal" placeholder="例：1000" oninput="updateOrderUnitHint()"></div>
     </div>
     <datalist id="it-ou-list"><option value="箱"><option value="卷"><option value="斤"><option value="包"><option value="袋"><option value="打"></datalist>
     <div id="it-ou-hint" style="font-size:10px;color:var(--grey);line-height:1.5;margin-bottom:16px"></div>
