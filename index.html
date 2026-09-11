@@ -1273,14 +1273,14 @@ async function copyOrder(sup){
   list.forEach(i=>{if(!orderedCodes.includes(i.code))orderedCodes.push(i.code);});
   const sent=await push("erp_place_orders",{p_rows:rows});
   if(!pendingPays.find(p=>p.payee===sup)) pendingPays.push({payee:sup,amt:Math.round(est),items:list.map(i=>i.name).join("、"),supplier:true});
-  renderPay();renderOrder();
+  renderPay();renderOrder();renderInv();renderBrew();   // 庫存頁、煮茶頁的「該叫貨」都不算已叫的
   toast("已複製並標記已叫，可貼 LINE 給"+sup+(sent?"":"　⚠ 待同步"));
 }
 async function cancelOrdered(code){
   if(!canWrite())return;
   orderedCodes=orderedCodes.filter(c=>c!==code);
   await push("erp_cancel_order",{p_code:code});
-  renderOrder();
+  renderOrder();renderInv();renderBrew();
   toast("已取消「等貨中」標記");
 }
 
