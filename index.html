@@ -1574,7 +1574,7 @@ function renderInv(){
 }
 function refreshSummary(){
   $("#st-total").textContent=items.length;
-  $("#st-low").textContent=items.filter(i=>i.bal<=i.safe).length;
+  $("#st-low").textContent=items.filter(i=>needsOrder(i)&&!orderedCodes.includes(i.code)).length;
   $("#st-val").textContent=money(items.reduce((s,i)=>s+i.bal*i.cost,0));
 }
 
