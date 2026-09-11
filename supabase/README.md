@@ -20,6 +20,7 @@
 | 10 | `10_orders_fix.sql` | 訂單編號會重複，改成每日快照不做 upsert |
 | 11 | `11_campaign.sql` | 活動期間對比（`erp_campaign_report`） |
 | 12 | `12_recipes.sql` | 飲料配方 BOM、糖按甜度扣、出餐時間欄位 |
+| 13 | `13_orders_upsert.sql` | 訂單層改用自然鍵 upsert，重疊的日報表不會互相蓋掉 |
 
 順序不能顛倒（03 要先有 01、02 建立的物件才收得掉權限）。
 

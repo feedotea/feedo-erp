@@ -199,7 +199,34 @@ function importCsv(token, fileName, bytes, text, summary, cats) {
     muteHttpExceptions: true
   });
   if (res.getResponseCode() >= 300) throw new Error(res.getContentText());
-  return JSON.parse(res.getContentText());
+  const out = JSON.parse(res.getContentText());
+
+  /* 後來加的兩件事，網頁手動匯入會做，這裡以前沒做：
+     訂單層（時段／單筆／人力估算）和配方扣料（鮮奶糖料）。
+     少了它們不會報錯，只是分析頁那幾區停在最後一次手動匯入的日子，
+     鮮奶和糖的庫存慢慢跟實際對不上 —— 靜靜地壞，最難發現。
+     兩支都是「整天重算」，重跑不會疊加；失敗只記 log，不擋主流程。 */
+  const dates = parsed.days.map(d => d.date);
+  try {
+    if (parsed.orders.length) rpc_(token, 'erp_pos_save_orders', { p_orders: parsed.orders });
+  } catch (e) { Logger.log('訂單層存檔失敗：' + e); }
+  try {
+    rpc_(token, 'erp_recipe_deduct', { p_dates: dates });
+  } catch (e) { Logger.log('配方扣料失敗：' + e); }
+
+  return out;
+}
+
+function rpc_(token, fn, args) {
+  const r = UrlFetchApp.fetch(CFG.url + '/rest/v1/rpc/' + fn, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { apikey: CFG.anon, Authorization: 'Bearer ' + token },
+    payload: JSON.stringify(args),
+    muteHttpExceptions: true
+  });
+  if (r.getResponseCode() >= 300) throw new Error(fn + ' ' + r.getContentText());
+  return JSON.parse(r.getContentText() || 'null');
 }
 
 function sha256Hex(bytes) {
@@ -330,23 +357,34 @@ function buildPayload(text) {
     throw new Error('這不是訂單列表（找不到 訂單項目/總價/付款時間 欄）');
   }
 
-  const dayMap = {}, items = [];
+  const cKind = hdr.indexOf('訂單類別');
+  const dayMap = {}, items = [], orders = [];
   rows.slice(1).forEach(r => {
     if (cStat >= 0 && r[cStat] && r[cStat] !== '完成') return;   // 取消的不算
-    const m = (r[cPaid] || '').match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+    const m = (r[cPaid] || '').match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
     if (!m) return;
     const d = m[1] + '-' + ('0'+m[2]).slice(-2) + '-' + ('0'+m[3]).slice(-2);
     if (!dayMap[d]) dayMap[d] = { date: d, revenue: 0, orders: 0 };
-    dayMap[d].revenue += num(r[cTotal]);
+    const total = num(r[cTotal]);
+    dayMap[d].revenue += total;
     dayMap[d].orders++;
-    parseOrderItems(r[cItems]).forEach(it => {
-      items.push({ date: d, order_no: cNo >= 0 ? r[cNo] : null,
+    const its = parseOrderItems(r[cItems]);
+    const no = cNo >= 0 ? String(r[cNo] || '').trim() : '';
+    its.forEach(it => {
+      items.push({ date: d, order_no: no || null,
                    name: it.name, qty: it.qty, options: it.options });
     });
+    // 訂單層：時段、單筆、人力估算要用。跟 index.html 的 posBuild 同一套
+    if (no) {
+      const hh = m[4] ? ('0'+m[4]).slice(-2) + ':' + m[5] + ':' + (m[6] || '00') : null;
+      orders.push({ date: d, no: no, at: hh ? d + ' ' + hh : null, total: total,
+                    items: its.reduce((a, b) => a + b.qty, 0),
+                    channel: cKind >= 0 ? (r[cKind] || null) : null });
+    }
   });
 
   const days = Object.keys(dayMap).sort().map(k => dayMap[k]);
-  return { days: days, items: items };
+  return { days: days, items: items, orders: orders };
 }
 
 // 裝好之後拿真檔跑一次，Log 出來的數字要跟微碧「營運總表」一樣
@@ -365,6 +403,33 @@ function testParse() {
   });
 }
 
+
+/* 一次性工具：補訂單層和配方扣料，不重匯明細、不動標籤。
+
+   舊版自動匯入只存明細和營收，沒存訂單層（付款時間、整單金額），
+   所以那段時間的日子在時段／單筆／人力估算裡是空的。
+   這支只呼叫 erp_pos_save_orders 和 erp_recipe_deduct —— 兩支都是
+   「整天重算」，跑幾次都一樣；erp_pos_import 完全不碰，所以營收、
+   明細、包材扣料都不會重複。
+
+   SINCE 改成要補的起始日。預設補 2026-09-01 之後（全部是舊版匯的）。 */
+function backfillOrders() {
+  const SINCE = '2026/08/31';
+  const threads = GmailApp.search('from:noreply@weibyapps.com has:attachment after:' + SINCE, 0, 100);
+  const token = signIn();
+  let files = 0, orders = 0, days = {};
+  threads.forEach(t => t.getMessages().forEach(msg => msg.getAttachments().forEach(att => {
+    if (!/訂單列表.*\.csv$/i.test(att.getName())) return;
+    const p = buildPayload(att.getDataAsString('UTF-8'));
+    if (!p.orders.length) return;
+    rpc_(token, 'erp_pos_save_orders', { p_orders: p.orders });
+    rpc_(token, 'erp_recipe_deduct',  { p_dates: p.days.map(d => d.date) });
+    files++; orders += p.orders.length;
+    p.days.forEach(d => days[d.date] = true);
+  })));
+  Logger.log('補完：' + files + ' 個檔、' + orders + ' 筆訂單、' +
+             Object.keys(days).length + ' 天（' + Object.keys(days).sort().join(', ') + '）');
+}
 
 /* 一次性工具：把「已匯入」標籤全部拿掉，讓 run() 重新處理所有信。
    解析邏輯改過之後才需要跑這個，平常不要動。
