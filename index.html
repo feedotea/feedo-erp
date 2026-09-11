@@ -350,12 +350,13 @@ select.txt-input{appearance:none;-webkit-appearance:none}
     <div class="field"><label>每日桶數記錄？（選「是」會出現在煮茶頁）</label>
       <div class="seg" id="it-tea"><button data-v="yes">是</button><button class="on" data-v="no">否</button></div></div>
     <div style="display:flex;gap:10px">
-      <div class="field" style="flex:1"><label>目前庫存<small style="color:var(--grey);font-weight:400"> · 改這裡會記一筆盤點調整</small></label><input class="txt-input" id="it-bal" type="number" inputmode="decimal" placeholder="0"></div>
-      <div class="field" style="flex:1"><label>安全庫存</label><input class="txt-input" id="it-safe" type="number" inputmode="decimal" placeholder="0"></div>
+      <div class="field" style="flex:1"><label>目前庫存 <span class="it-u"></span><small style="color:var(--grey);font-weight:400"> · 改這裡會記一筆盤點調整</small></label><input class="txt-input" id="it-bal" type="number" inputmode="decimal" placeholder="0"></div>
+      <div class="field" style="flex:1"><label>安全庫存 <span class="it-u"></span></label><input class="txt-input" id="it-safe" type="number" inputmode="decimal" placeholder="0"></div>
     </div>
     <div style="display:flex;gap:10px">
-      <div class="field" style="flex:1"><label>進貨成本</label><input class="txt-input" id="it-cost" type="number" inputmode="decimal" placeholder="0"></div>
-      <div class="field" style="flex:1"><label>一天約用量<small style="color:var(--grey);font-weight:400"> · 手填預估</small></label><input class="txt-input" id="it-avg" type="number" inputmode="decimal" placeholder="0">
+      <div class="field" style="flex:1"><label>進貨成本 <span class="it-u-cost" style="color:var(--alert)"></span></label><input class="txt-input" id="it-cost" type="number" inputmode="decimal" step="0.0001" placeholder="0">
+        <div id="it-cost-help" style="font-size:10px;color:var(--grey);margin-top:4px;line-height:1.5"></div></div>
+      <div class="field" style="flex:1"><label>一天約用量 <span class="it-u"></span><small style="color:var(--grey);font-weight:400"> · 手填預估</small></label><input class="txt-input" id="it-avg" type="number" inputmode="decimal" placeholder="0">
         <div id="it-avg-hint" style="font-size:10px;color:var(--ok);margin-top:4px;display:none"></div></div>
     </div>
     <div style="display:flex;gap:10px">
@@ -1581,7 +1582,9 @@ function refreshSummary(){
 /* 周邊佔營收 33.8%（T-Shirt、帽子、杯套、貼紙），比任何一個飲料
    品類都大，但原本連分類都沒有，等於整塊在系統外。 */
 const IT_CATS=["茶葉","糖類","乳品","配料","包材","周邊"];
-const IT_UNITS=["g","kg","瓶","L","個","件","包","箱","捲","組"];
+// ml 一定要有：鮮奶、果糖、鮮奶油都是液體，配方是「一杯 120 ml」這樣填的。
+// 沒有 ml 的話只能選「瓶」或「L」，一杯要填 0.12 L，店長一定會填錯。
+const IT_UNITS=["g","kg","ml","L","瓶","個","件","包","箱","捲","組"];
 let editingCode=null, itSel={cat:"茶葉",unit:"g",tea:false};
 function openItemEdit(code){
   editingCode=code;
@@ -1589,7 +1592,10 @@ function openItemEdit(code){
   $("#item-modal-title").textContent=it?"編輯品項":"新增品項";
   $("#it-save-btn").textContent=it?"儲存":"新增";
   $("#it-del-btn").style.display=it?"block":"none";
-  itSel={cat:it?it.cat:"茶葉",unit:it?it.unit:"g",tea:it?!!it.tea:false};
+  /* 新增時不預設分類和單位。
+     原本預設「茶葉／g」—— 只打了「鮮奶」就按新增，會變成一包以公克計的
+     茶葉，而且看起來完全正常，要到叫貨或配方才發現不對。逼他選一次。 */
+  itSel={cat:it?it.cat:null,unit:it?it.unit:null,tea:it?!!it.tea:false};
   $("#it-name").value=it?it.name:"";
   $("#it-bal").value=it?it.bal:"";
   $("#it-safe").value=it?it.safe:"";
@@ -1609,11 +1615,29 @@ function openItemEdit(code){
   IT_UNITS.forEach(u=>{const b=document.createElement("div");b.className="chip"+(itSel.unit===u?" on":"");b.textContent=u;
     b.onclick=()=>{itSel.unit=u;openItemChips();};ubox.appendChild(b);});
   [...$("#it-tea").children].forEach(b=>b.classList.toggle("on",(b.dataset.v==="yes")===itSel.tea));
+  openItemChips();
   $("#modal-item").classList.remove("hidden");
 }
+/* 數量和成本欄位旁邊直接寫出單位。
+   「進貨成本」是每 1 個單位多少錢 —— 鮮奶選 ml 就要填每 1 ml 多少
+   （一瓶 936 ml 賣 $95 → 0.1）。直接填一瓶的價錢 95 的話，一杯 120 ml
+   會算成 $11,400，所有毛利都會錯，而且看不出來。所以單位要寫在眼前，
+   液體和重量再給一行換算範例。 */
+const UNIT_EG={
+  ml:"例：一瓶 936 ml 賣 $95 → 95 ÷ 936 ＝ 0.1",
+  g:"例：一斤 600 g 賣 $900 → 900 ÷ 600 ＝ 1.5",
+  L:"例：一桶 5 L 賣 $400 → 400 ÷ 5 ＝ 80",
+  kg:"例：一包 25 kg 賣 $1,000 → 1000 ÷ 25 ＝ 40"
+};
 function openItemChips(){
   [...$("#it-cats").children].forEach(b=>b.classList.toggle("on",b.textContent===itSel.cat));
   [...$("#it-units").children].forEach(b=>b.classList.toggle("on",b.textContent===itSel.unit));
+  const u=itSel.unit;
+  document.querySelectorAll("#modal-item .it-u").forEach(e=>e.textContent=u?`（${u}）`:"");
+  const c=document.querySelector("#modal-item .it-u-cost");
+  if(c) c.textContent=u?`（每 1 ${u} 多少錢）`:"（先選單位）";
+  const h=$("#it-cost-help");
+  if(h) h.textContent=u?(UNIT_EG[u]||`買一整箱的話：總價 ÷ 箱裡有幾${u}`):"";
 }
 $("#it-tea").addEventListener("click",e=>{if(e.target.dataset.v){itSel.tea=e.target.dataset.v==="yes";
   [...$("#it-tea").children].forEach(b=>b.classList.toggle("on",b.dataset.v===e.target.dataset.v));}});
@@ -1621,6 +1645,8 @@ async function saveItemEdit(){
   if(!canWrite())return;
   const name=$("#it-name").value.trim();
   if(!name){toast("填品項名稱");return;}
+  if(!itSel.cat){toast("選一個分類（茶葉、乳品、糖類…）");return;}
+  if(!itSel.unit){toast("選一個單位（液體用 ml、茶葉用 g）");return;}
   const bal=parseFloat($("#it-bal").value)||0, safe=parseFloat($("#it-safe").value)||0;
   const cost=parseFloat($("#it-cost").value)||0, avg=parseFloat($("#it-avg").value)||0;
   const supplier=$("#it-supplier").value.trim()||"—";
