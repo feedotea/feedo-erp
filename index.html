@@ -502,6 +502,7 @@ select.txt-input{appearance:none;-webkit-appearance:none}
     <span id="rep-month-big">—</span>
     <button onclick="changeReportMonth(1)" id="rep-next">▶</button>
   </div>
+  <div id="rev-gaps" class="hidden" style="border:1.5px solid var(--warn,#B3271E);padding:12px;margin-bottom:14px;font-size:12px;line-height:1.9"></div>
   <div class="sec-eyebrow">損益 · <span id="rep-month"></span></div>
   <div class="pl-card">
     <div class="pl-row"><span class="k">營收（每日累計）</span><span class="v" id="pl-rev">—</span></div>
@@ -1803,7 +1804,26 @@ async function loadMonthReport(){
     if(r&&r.month===viewMonth){ monthReport=r; renderReport(); renderRevenue(); }
   }catch(e){ console.warn("月報表讀取失敗",e); }
 }
+/* 營收與訂單明細的對帳提醒。
+   微碧的報表是跨夜區間，同一個營業日會被切在兩封信裡；後面那封要是沒匯成功，
+   那天的營收就會停在一個很小的數字，而訂單明細卻是完整的（發生過一次）。
+   差額同時超過 100 元與 5% 才報，
+   因為營運總表與訂單明細本來就有招待／退款造成的小差。 */
+async function loadRevenueGaps(){
+  const box=$("#rev-gaps"); if(!box) return;
+  try{
+    const rows=await callRpc("erp_revenue_gaps",{});
+    if(!rows || !rows.length){ box.classList.add("hidden"); box.innerHTML=""; return; }
+    box.innerHTML = '<b>營收對不上訂單明細</b><br>'
+      + rows.map(r=>`${r.day}：營收 ${money(r.revenue)}，訂單 ${r.orders} 筆共 ${money(r.orders_amount)}`
+                    + `（差 ${money(r.diff)}）`).join('<br>')
+      + '<br><span style="color:var(--grey)">多半是那天的微碧報表沒有匯進來。跟我說一聲，可以補。</span>';
+    box.classList.remove("hidden");
+  }catch(e){ console.warn("對帳讀取失敗", e); }
+}
+
 function renderReport(){
+  loadRevenueGaps();
   const m=viewMonth;$("#rep-month").textContent=m;
   const big=$("#rep-month-big");if(big)big.textContent=fmtMonthLabel(m);
   const nb=$("#rep-next");if(nb)nb.disabled=(m>=curMonth());
