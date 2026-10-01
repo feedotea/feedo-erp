@@ -1821,8 +1821,10 @@ async function loadRevenueGaps(){
     const rows=await callRpc("erp_revenue_gaps",{});
     if(!rows || !rows.length){ box.classList.add("hidden"); box.innerHTML=""; return; }
     box.innerHTML = '<b>營收對不上訂單明細</b><br>'
-      + rows.map(r=>`${r.day}：營收 ${money(r.revenue)}，訂單 ${r.orders} 筆共 ${money(r.orders_amount)}`
-                    + `（差 ${money(r.diff)}）`).join('<br>')
+      + rows.map(r=> r.missing
+            ? `${r.day}：<b>完全沒有營收記錄</b>，但訂單有 ${r.orders} 筆共 ${money(r.orders_amount)}`
+            : `${r.day}：營收 ${money(r.revenue)}，訂單 ${r.orders} 筆共 ${money(r.orders_amount)}`
+              + `（差 ${money(r.diff)}）`).join('<br>')
       + '<br><span style="color:var(--grey)">多半是那天的微碧報表沒有匯進來。跟我說一聲，可以補。</span>';
     box.classList.remove("hidden");
   }catch(e){ console.warn("對帳讀取失敗", e); }
