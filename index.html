@@ -466,8 +466,13 @@ select.txt-input{appearance:none;-webkit-appearance:none}
     <div class="modal-note">煮壞、過期、試喝倒掉的記這裡，不算進「用量」，才不會讓預測失真。</div>
     <div class="field"><label>品項</label><div class="chips pick" id="waste-items"></div></div>
     <div class="field"><label>單位</label><div class="chips" id="waste-units"></div></div>
-    <div class="field"><label>數量 <span id="waste-unit" style="color:var(--ink)"></span></label>
-      <input class="num-input" id="waste-qty" type="number" inputmode="decimal" placeholder="0"></div>
+    <div style="display:flex;gap:10px">
+      <div class="field" style="flex:1"><label>數量 <span id="waste-unit" style="color:var(--ink)"></span></label>
+        <input class="num-input" id="waste-qty" type="number" inputmode="decimal" placeholder="0"></div>
+      <!-- 昨天倒掉的今天才想到要記，很正常；沒選就是今天 -->
+      <div class="field" style="flex:1"><label>日期</label>
+        <input class="txt-input" id="waste-date" type="date"></div>
+    </div>
     <div class="field"><label>原因</label>
       <div class="chips" id="waste-reasons"></div></div>
     <button class="btn-primary" onclick="submitWaste()">記錄損耗</button>
@@ -2426,6 +2431,7 @@ function openWaste(){
   WASTE_REASONS.forEach(r=>{const c=document.createElement("div");c.className="chip";c.textContent=r;
     c.onclick=()=>{wasteState.reason=r;[...rb.children].forEach(x=>x.classList.remove("on"));c.classList.add("on");};rb.appendChild(c);});
   $("#waste-qty").value="";
+  const dt=$("#waste-date"); dt.value=localDate(); dt.max=localDate();   // 不能記到未來
   $("#modal-waste").classList.remove("hidden");
 }
 // 損耗填的單位換算成品項單位。換不了就擋下來，
@@ -2447,11 +2453,13 @@ async function submitWaste(){
   const qty=toItemUnit(q,unit,it.unit);
   if(qty===null){toast(`${unit} 換不成 ${it.unit}，請改用 ${it.unit} 填`);return;}
   it.bal=Math.max(0,it.bal-qty);
+  const d=$("#waste-date").value||localDate();
   const sent=await push("erp_log_move",{
     p_id:uuid(),p_code:it.code,p_kind:"waste",p_qty:qty,
-    p_note:`${wasteState.reason}（填 ${q}${unit}）`,p_date:localDate()});
+    p_note:`${wasteState.reason}（填 ${q}${unit}）`,p_date:d});
   closeModal('waste');renderInv();renderOrder();renderBrew();refreshSummary();loadWaste();
-  toast(`${it.name} 損耗 ${q}${unit}（${wasteState.reason}）`+(sent?"":"　⚠ 待同步"));
+  const back=d!==localDate()?`${d.slice(5)} `:"";
+  toast(`${back}${it.name} 損耗 ${q}${unit}（${wasteState.reason}）`+(sent?"":"　⚠ 待同步"));
   if(sent)resyncIfClean();
 }
 function closeModal(name){$("#modal-"+name).classList.add("hidden");}
