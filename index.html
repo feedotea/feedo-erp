@@ -354,8 +354,13 @@ select.txt-input{appearance:none;-webkit-appearance:none}
     <div class="field"><label>品項名稱</label><input class="txt-input" id="it-name" placeholder="例：台東紅烏龍"></div>
     <div class="field"><label>分類</label><div class="chips" id="it-cats"></div></div>
     <div class="field"><label>單位</label><div class="chips" id="it-units"></div></div>
-    <div class="field"><label>每日桶數記錄？（選「是」會出現在煮茶頁）</label>
-      <div class="seg" id="it-tea"><button data-v="yes">是</button><button class="on" data-v="no">否</button></div></div>
+    <div style="display:flex;gap:10px">
+      <div class="field" style="flex:1"><label>每日桶數記錄？（選「是」會出現在煮茶頁）</label>
+        <div class="seg" id="it-tea"><button data-v="yes">是</button><button class="on" data-v="no">否</button></div></div>
+      <!-- 每種茶的包裝不一樣（紅烏龍 600、阿薩姆 300），之前全部吃預設 100，盤點會差好幾倍 -->
+      <div class="field" style="flex:1" id="it-packg-box"><label>一包幾克<small style="color:var(--grey);font-weight:400"> · 盤點和庫存頁用這個換算</small></label>
+        <input class="txt-input" id="it-packg" type="number" inputmode="decimal" placeholder="例：600"></div>
+    </div>
     <div style="display:flex;gap:10px">
       <div class="field" style="flex:1"><label>目前庫存 <span class="it-u"></span><small style="color:var(--grey);font-weight:400"> · 改這裡會記一筆盤點調整</small></label><input class="txt-input" id="it-bal" type="number" inputmode="decimal" placeholder="0"></div>
       <div class="field" style="flex:1"><label>安全庫存 <span class="it-u"></span></label><input class="txt-input" id="it-safe" type="number" inputmode="decimal" placeholder="0"></div>
@@ -1632,6 +1637,8 @@ function openItemEdit(code){
   $("#it-cover").value=it?it.coverDays:"";
   $("#it-ou").value=it&&it.orderUnit?it.orderUnit:"";
   $("#it-op").value=it&&it.orderUnit&&it.orderPack?it.orderPack:"";
+  $("#it-packg").value=it?it.packG:"";
+  togglePackG();
   $("#it-cu").value=it&&it.countUnit?it.countUnit:"";
   $("#it-cp").value=it&&it.countUnit&&it.countPack?it.countPack:"";
   // 等貨中的單記的是舊單位，這時候改會讓在途量和到貨換算都錯（後端也會擋）
@@ -1698,8 +1705,12 @@ function updateOrderUnitHint(){
   else if(!(op>0)) {h.style.color="var(--alert)";h.textContent=`要填 1 ${ou} 裡有幾${u||"個"}。`;}
   else h.textContent=`叫貨頁會寫「叫 2 ${ou}」，到貨時自動記成 ${(2*op).toLocaleString()} ${u||""}。`;
 }
+function togglePackG(){
+  const box=$("#it-packg-box"); if(box) box.style.visibility=itSel.tea?"visible":"hidden";
+}
 $("#it-tea").addEventListener("click",e=>{if(e.target.dataset.v){itSel.tea=e.target.dataset.v==="yes";
-  [...$("#it-tea").children].forEach(b=>b.classList.toggle("on",b.dataset.v===e.target.dataset.v));}});
+  [...$("#it-tea").children].forEach(b=>b.classList.toggle("on",b.dataset.v===e.target.dataset.v));
+  togglePackG();}});
 async function saveItemEdit(){
   if(!canWrite())return;
   const name=$("#it-name").value.trim();
@@ -1732,7 +1743,10 @@ async function saveItemEdit(){
     const p_item={
       code, name, cat:itSel.cat, unit:itSel.unit, safe_qty:safe, cost,
       supplier: supplier==="—"?null:supplier, is_tea:itSel.tea,
-      pack_g: prev?prev.packG:PACK_G, avg_per_day_manual:avg, note: prev?prev.note:"",
+      // 茶葉才用得到；不是茶就保留原值，免得被預設值洗掉
+      pack_g: itSel.tea ? (parseFloat($("#it-packg").value) || (prev?prev.packG:PACK_G))
+                        : (prev?prev.packG:PACK_G),
+      avg_per_day_manual:avg, note: prev?prev.note:"",
       lead_days:  Math.max(0, parseInt($("#it-lead").value)  || (prev?prev.leadDays:3)),
       cover_days: Math.max(1, parseInt($("#it-cover").value) || (prev?prev.coverDays:14)),
       sort_order: prev?prev.sortOrder:0
