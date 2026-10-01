@@ -2351,9 +2351,20 @@ function posShowError(msg, raw){
    填 g 等於逼人心算。未拆的數包數，拆開那包估半包。 */
 let stocktakeVals={};
 // 盤點單位：茶葉用「包」，其餘用品項本來的單位
-function stUnit(it){ return it.tea ? "包" : it.unit; }
-function stSys(it){ return it.tea ? Math.round(it.bal/it.packG*10)/10 : it.bal; }
-function stToBase(it,v){ return it.tea ? v*it.packG : v; }
+/* 盤點要用「數得出來的單位」。
+   茶葉數包（一包 100g），鮮奶數瓶（一瓶 936ml）—— 沒人會去數毫升。
+   只認單罐單包的叫貨單位；「箱」不算，0.75 箱比 2800ml 更難填。
+   庫存和配方照樣存基本單位，這裡只換輸入和顯示，成本完全不受影響。*/
+const ST_PACK_UNITS=["瓶","包","罐","袋","捲","條","盒"];
+function stPack(it){
+  if(it.tea) return {u:"包", k:it.packG};
+  if(it.orderPack>1 && it.orderUnit && it.orderUnit!==it.unit
+     && ST_PACK_UNITS.includes(it.orderUnit)) return {u:it.orderUnit, k:it.orderPack};
+  return {u:it.unit, k:1};
+}
+function stUnit(it){ return stPack(it).u; }
+function stSys(it){ const p=stPack(it); return p.k===1 ? it.bal : Math.round(it.bal/p.k*10)/10; }
+function stToBase(it,v){ const p=stPack(it); return p.k===1 ? v : v*p.k; }
 
 function renderStocktake(){
   const box=$("#stocktake-list"); if(!box) return;
@@ -2362,7 +2373,9 @@ function renderStocktake(){
     const u=stUnit(it), sys=stSys(it);
     const prev=stocktakeVals[it.code];
     const row=document.createElement("div");row.className="st-row";
-    row.innerHTML=`<div class="nm">${it.name}${it.tea?' 🍵':''}</div>
+    const p=stPack(it);
+    const hint=p.k===1?"":`　<span style="color:var(--grey)">1${u} = ${p.k}${it.unit}</span>`;
+    row.innerHTML=`<div class="nm">${it.name}${it.tea?' 🍵':''}${hint}</div>
       <div class="sys">帳面 ${sys}${u}</div>
       <input type="number" inputmode="decimal" step="0.5" placeholder="實數(${u})" id="st-${it.code}"
              value="${prev===undefined?"":prev}" oninput="calcDiff('${it.code}')">
