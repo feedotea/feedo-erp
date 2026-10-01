@@ -169,8 +169,14 @@ update erp_items set count_unit = '瓶', count_pack = 1000, updated_at = now()
 
 -- 迎香紅烏龍：其他茶是靠 is_tea 數包，它的 is_tea 是 false（疑似漏設，但煮茶頁
 -- 可能是記「紅烏龍」那一項，不敢亂翻），所以先只給盤點單位，不動煮茶頁。
-update erp_items set count_unit = '包', count_pack = 100, updated_at = now()
+update erp_items set count_unit = '包', count_pack = 600, updated_at = now()
  where code = 'TEA-11';
+
+-- 茶葉「一包幾 g」每種不一樣，但建品項時全部吃到預設的 100 ——
+-- 盤點數 1 包紅烏龍會被當成 100g，實際 600g，差六倍。
+-- 2026-10-01 老闆確認：紅烏龍 600、迎香紅烏龍 600、阿薩姆 300，其餘維持 100。
+update erp_items set pack_g = 600, updated_at = now() where code in ('TEA-01','TEA-11');
+update erp_items set pack_g = 300, updated_at = now() where code = 'TEA-06';
 
 commit;
 
