@@ -2466,6 +2466,17 @@ async function loadWaste(){
   catch(e){ console.warn("損耗讀取失敗",e); box.innerHTML=wasteEmpty("讀不到，等一下再回這頁"); return; }
   renderWaste(rows||[]);
 }
+/* 刪掉記錯的那筆。庫存是異動加總算的，所以刪掉那筆就等於把數量加回去，
+   不用再補一筆反向異動（補反向的話損耗清單會多出一筆看不懂的東西）。*/
+async function delWaste(r){
+  if(!canWrite())return;
+  if(!confirm(`刪掉這筆？\n\n${r.name}　${r.qty}${r.unit}（${r.note}）\n\n庫存會把 ${r.qty}${r.unit} 加回去。`))return;
+  try{ await callRpc("erp_waste_delete",{p_id:r.id}); }
+  catch(e){ console.warn("損耗刪除失敗",e); toast(e.message||"刪不掉，請重試"); return; }
+  const it=items.find(i=>i.code===r.code); if(it) it.bal=(+it.bal||0)+(+r.qty||0);
+  renderInv();renderOrder();renderBrew();refreshSummary();loadWaste();
+  toast(`已刪除：${r.name} ${r.qty}${r.unit}`);
+}
 function wasteEmpty(t){ return `<div class="empty"><div class="ic">🗑</div><div class="t">${t}</div></div>`; }
 const WASTE_SHOW=8;
 function renderWaste(rows){
@@ -2478,6 +2489,15 @@ function renderWaste(rows){
     row.innerHTML=`<span class="dot r"></span>
       <div class="nm">${r.name}<small>${r.day} · ${r.note}${r.who?" · "+r.who:""}</small></div>
       <div class="bal"><div class="b">${(+r.qty).toLocaleString()} ${r.unit}</div>${amt}</div>`;
+    // 記錯了要刪得掉。店員只看得到自己那幾筆的 ✕，店長誰的都能刪
+    if(r.mine||isManager()){
+      const x=document.createElement("button");
+      x.textContent="✕"; x.title="刪掉這筆";
+      x.style.cssText="background:none;border:none;color:var(--grey);font-size:15px;"
+        +"cursor:pointer;padding:6px 2px 6px 8px;line-height:1";
+      x.onclick=()=>delWaste(r);
+      row.appendChild(x);
+    }
     box.appendChild(row);
   });
   const total=rows.reduce((s,r)=>s+(+r.cost||0),0);
