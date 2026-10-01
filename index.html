@@ -2465,9 +2465,17 @@ async function submitStocktake(){
 let wasteState={code:null,reason:null,unit:null};
 const WASTE_REASONS=["煮壞","過期","試喝","招待","灑出/摔破","其他"];
 const WASTE_UNITS=["ml","個","公克","斤"];
+/* 奶蓋是一鍋一鍋打的，打完沒賣完就整鍋倒掉 —— 但它不是品項，是四樣材料
+   （鮮奶油／鮮奶／煉乳／海鹽）的組合，所以損耗要按配方拆回去扣。
+   一鍋 618g、一杯 50g（配方匯入的換算依據），所以一鍋 ＝ 12.36 杯。*/
+const CAP_NAME="奶蓋", CAP_POT_CUPS=618/50;
+const CAP_UNITS=["杯","鍋"];
 function openWaste(){
-  wasteState={code:null,reason:null,unit:null};
+  wasteState={code:null,reason:null,unit:null,combo:null};
   const box=$("#waste-items");box.innerHTML="";
+  // 配方只有開「飲料配方」時才載，奶蓋那顆要靠它，所以在背景補載一次
+  if(!recData) callRpc("erp_recipes_config").then(d=>{recData=d;
+    if(!$("#modal-waste").classList.contains("hidden")) addComboChip();}).catch(()=>{});
   // 會倒掉的幾乎都是食材；周邊（T-shirt、帽子、杯套）和包材排到最後
   const back=["周邊","包材"];
   const sorted=[...items].sort((a,b)=>(back.indexOf(a.cat)+1||0)-(back.indexOf(b.cat)+1||0));
@@ -2477,6 +2485,7 @@ function openWaste(){
       // 預設帶入品項單位
       [...$("#waste-units").children].forEach(x=>x.classList.remove("on"));
     };box.appendChild(c);});
+  addComboChip();
   const ub=$("#waste-units");ub.innerHTML="";
   WASTE_UNITS.forEach(u=>{const c=document.createElement("div");c.className="chip";c.textContent=u;
     c.onclick=()=>{wasteState.unit=u;[...ub.children].forEach(x=>x.classList.remove("on"));c.classList.add("on");
@@ -2499,6 +2508,7 @@ function toItemUnit(qty,fromUnit,itemUnit){
 async function submitWaste(){
   if(!canWrite())return;
   const q=parseFloat($("#waste-qty").value);
+  if(wasteState.combo) return submitComboWaste(q);
   if(!wasteState.code){toast("先選品項");return;}
   if(!q||q<=0){toast("填數量");return;}
   if(!wasteState.reason){toast("選原因");return;}
@@ -2514,6 +2524,32 @@ async function submitWaste(){
   closeModal('waste');renderInv();renderOrder();renderBrew();refreshSummary();loadWaste();
   const back=d!==localDate()?`${d.slice(5)} `:"";
   toast(`${back}${it.name} 損耗 ${q}${unit}（${wasteState.reason}）`+(sent?"":"　⚠ 待同步"));
+  if(sent)resyncIfClean();
+}
+/* 奶蓋倒掉：按配方把四樣材料各扣一筆，備註寫清楚是奶蓋，
+   不然之後看損耗清單會看到「鮮奶油 258g」卻想不起來為什麼。*/
+async function submitComboWaste(q){
+  if(!q||q<=0){toast("填數量");return;}
+  if(!wasteState.reason){toast("選原因");return;}
+  const unit=wasteState.unit||"杯";
+  const cups=unit==="鍋"?q*CAP_POT_CUPS:q;
+  const rows=recRows(CAP_NAME).filter(r=>r.deduct!==false);
+  if(!rows.length){toast("找不到奶蓋配方");return;}
+  const d=$("#waste-date").value||localDate();
+  const note=`${CAP_NAME} ${wasteState.reason}（倒掉 ${q}${unit}）`;
+  let sent=true;
+  for(const r of rows){
+    const it=items.find(i=>i.code===r.item_code); if(!it) continue;
+    const qty=Math.round(r.qty*cups*1000)/1000;
+    if(qty<=0) continue;
+    it.bal=Math.max(0,it.bal-qty);
+    const ok=await push("erp_log_move",{
+      p_id:uuid(),p_code:it.code,p_kind:"waste",p_qty:qty,p_note:note,p_date:d});
+    if(!ok) sent=false;
+  }
+  closeModal('waste');renderInv();renderOrder();renderBrew();refreshSummary();loadWaste();
+  const back=d!==localDate()?`${d.slice(5)} `:"";
+  toast(`${back}${CAP_NAME}倒掉 ${q}${unit}（${wasteState.reason}）`+(sent?"":"　⚠ 待同步"));
   if(sent)resyncIfClean();
 }
 function closeModal(name){$("#modal-"+name).classList.add("hidden");}
@@ -2540,6 +2576,26 @@ async function delWaste(r){
   const it=items.find(i=>i.code===r.code); if(it) it.bal=(+it.bal||0)+(+r.qty||0);
   renderInv();renderOrder();renderBrew();refreshSummary();loadWaste();
   toast(`已刪除：${r.name} ${r.qty}${r.unit}`);
+}
+/* 奶蓋那顆排在最前面：它是最常整鍋倒掉的東西，卻不在品項清單裡 */
+function addComboChip(){
+  const box=$("#waste-items"); if(!box||!recData) return;
+  if(box.querySelector(".chip.combo")) return;
+  if(!recRows(CAP_NAME).length) return;              // 沒建奶蓋配方就不給這顆
+  const c=document.createElement("div");
+  c.className="chip combo"; c.textContent=CAP_NAME+"（整鍋倒掉）";
+  c.style.cssText="border-color:var(--ink);font-weight:600";
+  c.onclick=()=>{
+    wasteState={code:null, combo:CAP_NAME, unit:"杯", reason:wasteState.reason};
+    [...box.children].forEach(x=>x.classList.remove("on")); c.classList.add("on");
+    const ub=$("#waste-units"); ub.innerHTML="";
+    CAP_UNITS.forEach(u=>{const b=document.createElement("div");b.className="chip"+(u==="杯"?" on":"");
+      b.textContent=u;
+      b.onclick=()=>{wasteState.unit=u;[...ub.children].forEach(x=>x.classList.remove("on"));b.classList.add("on");
+        $("#waste-unit").textContent="("+u+")";};ub.appendChild(b);});
+    $("#waste-unit").textContent="(杯)";
+  };
+  box.insertBefore(c, box.firstChild);
 }
 function wasteEmpty(t){ return `<div class="empty"><div class="ic">🗑</div><div class="t">${t}</div></div>`; }
 const WASTE_SHOW=8;
