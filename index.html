@@ -213,9 +213,9 @@ select.txt-input{appearance:none;-webkit-appearance:none}
 .toast{position:fixed;bottom:130px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--paper);padding:12px 22px;border-radius:2px;font-size:13px;letter-spacing:1px;opacity:0;transition:.3s;z-index:50;pointer-events:none;border-left:3px solid var(--gilt);max-width:88%;text-align:center}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .scroll-hint{height:1px}
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:flex-end;justify-content:center}
+.modal-overlay{position:fixed;inset:0;top:var(--vvt,0px);height:var(--vvh,100%);background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:flex-end;justify-content:center}
 .modal-overlay.hidden{display:none}
-.modal-sheet{background:var(--news);width:100%;max-width:520px;max-height:90vh;overflow-y:auto;border-top:3px solid var(--gilt);border-radius:6px 6px 0 0;padding:18px 18px 30px}
+.modal-sheet{background:var(--news);width:100%;max-width:520px;max-height:min(90vh,100%);overflow-y:auto;border-top:3px solid var(--gilt);border-radius:6px 6px 0 0;padding:18px 18px 30px}
 .modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
 .modal-head .serif{font-family:"Cormorant Garamond",Georgia,serif;font-size:22px;font-weight:600}
 .modal-head button{background:none;border:none;font-size:22px;color:var(--grey);cursor:pointer}
@@ -2444,6 +2444,29 @@ async function submitWaste(){
   if(sent)resyncIfClean();
 }
 function closeModal(name){$("#modal-"+name).classList.add("hidden");}
+
+/* iOS 鍵盤一開，position:fixed 的 modal 底部會被鍵盤蓋住 ——
+   填完數量之後「原因」那排和「記錄」鍵就按不到了（sheet 本身也捲不動）。
+   這裡把遮罩縮成「現在看得到的那一塊」，sheet 的 max-height 跟著縮，
+   內容就能在 sheet 裡捲，鍵盤開著也按得到。*/
+(function trackViewport(){
+  const vv = window.visualViewport;
+  if(!vv) return;                       // 舊瀏覽器：維持原本的 100% / 90vh
+  const fit = () => {
+    const r = document.documentElement.style;
+    r.setProperty("--vvh", vv.height + "px");
+    r.setProperty("--vvt", vv.offsetTop + "px");
+  };
+  vv.addEventListener("resize", fit);
+  vv.addEventListener("scroll", fit);
+  fit();
+  // 點到輸入格時把它捲到中間，下面的選項才不用自己找
+  document.addEventListener("focusin", e => {
+    const t = e.target;
+    if(!t.closest || !t.closest(".modal-sheet")) return;
+    setTimeout(() => t.scrollIntoView({block:"center", behavior:"smooth"}), 300);
+  });
+})();
 
 /* ===== 月結對帳 ===== */
 let reconInput={};
