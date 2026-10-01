@@ -92,6 +92,9 @@ body{
 .field{margin-bottom:16px}
 .field label{display:block;font-size:11px;letter-spacing:2px;color:var(--grey);text-transform:uppercase;margin-bottom:7px}
 .chips{display:flex;flex-wrap:wrap;gap:7px}
+/* 品項有 45 個（含周邊），全部攤開是 700px，會把「原因」和送出鍵頂到螢幕外，
+   看起來就像按了沒反應。這一區自己捲，其他欄位永遠看得到。*/
+.chips.pick{max-height:34vh;overflow-y:auto;align-content:flex-start;border:1px solid var(--line);border-radius:2px;padding:7px}
 .chip{padding:9px 14px;border:1px solid var(--line);background:var(--paper);border-radius:2px;font-size:14px;cursor:pointer;letter-spacing:.5px}
 .chip.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 .seg{display:flex;border:1px solid var(--ink);border-radius:2px;overflow:hidden}
@@ -461,7 +464,7 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   <div class="modal-sheet">
     <div class="modal-head"><span class="serif">記損耗 / 報廢</span><button onclick="closeModal('waste')">✕</button></div>
     <div class="modal-note">煮壞、過期、試喝倒掉的記這裡，不算進「用量」，才不會讓預測失真。</div>
-    <div class="field"><label>品項</label><div class="chips" id="waste-items"></div></div>
+    <div class="field"><label>品項</label><div class="chips pick" id="waste-items"></div></div>
     <div class="field"><label>單位</label><div class="chips" id="waste-units"></div></div>
     <div class="field"><label>數量 <span id="waste-unit" style="color:var(--ink)"></span></label>
       <input class="num-input" id="waste-qty" type="number" inputmode="decimal" placeholder="0"></div>
@@ -2404,7 +2407,10 @@ const WASTE_UNITS=["ml","個","公克","斤"];
 function openWaste(){
   wasteState={code:null,reason:null,unit:null};
   const box=$("#waste-items");box.innerHTML="";
-  items.forEach(i=>{const c=document.createElement("div");c.className="chip";c.textContent=i.name;
+  // 會倒掉的幾乎都是食材；周邊（T-shirt、帽子、杯套）和包材排到最後
+  const back=["周邊","包材"];
+  const sorted=[...items].sort((a,b)=>(back.indexOf(a.cat)+1||0)-(back.indexOf(b.cat)+1||0));
+  sorted.forEach(i=>{const c=document.createElement("div");c.className="chip";c.textContent=i.name;
     c.onclick=()=>{wasteState.code=i.code;wasteState.unit=i.unit;[...box.children].forEach(x=>x.classList.remove("on"));c.classList.add("on");
       $("#waste-unit").textContent="("+(wasteState.unit||i.unit)+")";
       // 預設帶入品項單位
