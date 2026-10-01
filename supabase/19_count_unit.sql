@@ -163,6 +163,15 @@ update erp_items set count_unit = '箱', count_pack = 1000, updated_at = now()
 update erp_items set count_unit = '包', count_pack = 1000, updated_at = now()
  where code = 'PKG-03';
 
+-- 青森丸搾蘋果汁：一箱 6 瓶、一瓶 1L。盤點數瓶。
+update erp_items set count_unit = '瓶', count_pack = 1000, updated_at = now()
+ where code = 'JUI-01';
+
+-- 迎香紅烏龍：其他茶是靠 is_tea 數包，它的 is_tea 是 false（疑似漏設，但煮茶頁
+-- 可能是記「紅烏龍」那一項，不敢亂翻），所以先只給盤點單位，不動煮茶頁。
+update erp_items set count_unit = '包', count_pack = 100, updated_at = now()
+ where code = 'TEA-11';
+
 commit;
 
 -- 驗證
