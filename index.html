@@ -374,6 +374,12 @@ select.txt-input{appearance:none;-webkit-appearance:none}
       <div class="field" style="flex:1;margin-bottom:6px"><label>叫貨單位<small style="color:var(--grey);font-weight:400"> · 空著＝用庫存單位叫</small></label><input class="txt-input" id="it-ou" list="it-ou-list" placeholder="例：箱、卷、斤" oninput="updateOrderUnitHint()"></div>
       <div class="field" style="flex:1;margin-bottom:6px"><label id="it-op-lab" style="text-transform:none">1 叫貨單位 ＝ 幾個</label><input class="txt-input" id="it-op" type="number" inputmode="decimal" placeholder="例：1000" oninput="updateOrderUnitHint()"></div>
     </div>
+    <div style="display:flex;gap:10px">
+      <div class="field" style="flex:1;margin-bottom:6px"><label>盤點單位<small style="color:var(--grey);font-weight:400"> · 空著＝用庫存單位數</small></label><input class="txt-input" id="it-cu" list="it-cu-list" placeholder="例：瓶、包、罐" oninput="updateCountUnitHint()"></div>
+      <div class="field" style="flex:1;margin-bottom:6px"><label id="it-cp-lab" style="text-transform:none">1 盤點單位 ＝ 幾個</label><input class="txt-input" id="it-cp" type="number" inputmode="decimal" placeholder="例：936" oninput="updateCountUnitHint()"></div>
+    </div>
+    <div id="it-cu-hint" style="font-size:10px;color:var(--grey);line-height:1.5;margin-bottom:16px"></div>
+    <datalist id="it-cu-list"><option value="瓶"><option value="包"><option value="罐"><option value="袋"><option value="捲"><option value="條"><option value="盒"></datalist>
     <datalist id="it-ou-list"><option value="箱"><option value="卷"><option value="斤"><option value="包"><option value="袋"><option value="打"></datalist>
     <div id="it-ou-hint" style="font-size:10px;color:var(--grey);line-height:1.5;margin-bottom:16px"></div>
     <div class="field"><label>供應商</label><input class="txt-input" id="it-supplier" placeholder="例：松霖"></div>
@@ -733,6 +739,8 @@ function mapItem(v){
     avgPerDay: Number(v.avg_per_day), avgIsActual: !!v.avg_is_actual,
     avgManual: Number(v.avg_per_day_manual),
     posRole: v.pos_role || null,
+    countUnit: v.count_unit || null,
+    countPack: Number(v.count_pack) || 0,
     orderUnit: v.order_unit || null,
     orderPack: Number(v.order_pack) || 0,
     leadDays: Number(v.lead_days) || 3,      // 下單到到貨幾天
@@ -1624,6 +1632,8 @@ function openItemEdit(code){
   $("#it-cover").value=it?it.coverDays:"";
   $("#it-ou").value=it&&it.orderUnit?it.orderUnit:"";
   $("#it-op").value=it&&it.orderUnit&&it.orderPack?it.orderPack:"";
+  $("#it-cu").value=it&&it.countUnit?it.countUnit:"";
+  $("#it-cp").value=it&&it.countUnit&&it.countPack?it.countPack:"";
   // 等貨中的單記的是舊單位，這時候改會讓在途量和到貨換算都錯（後端也會擋）
   const waiting=!!(it&&orderedCodes.includes(it.code));
   $("#it-ou").disabled=waiting; $("#it-op").disabled=waiting;
@@ -1663,6 +1673,18 @@ function openItemChips(){
   const h=$("#it-cost-help");
   if(h) h.textContent=u?(UNIT_EG[u]||`買一整箱的話：總價 ÷ 箱裡有幾${u}`):"";
   updateOrderUnitHint();
+  updateCountUnitHint();
+}
+/* 盤點單位：叫貨論箱、庫存記 ml，但盤點要數得出來 —— 蔗糖液數瓶、煉奶數包。
+   只換盤點時的輸入和顯示，庫存和配方照樣存基本單位，成本不受影響。 */
+function updateCountUnitHint(){
+  const u=itSel.unit, cu=$("#it-cu").value.trim(), cp=parseFloat($("#it-cp").value);
+  $("#it-cp-lab").textContent=`1 ${cu||"盤點單位"} ＝ 幾${u||"個"}`;
+  const h=$("#it-cu-hint"); if(!h) return;
+  h.style.color="var(--grey)";
+  if(!cu||cu===u) h.textContent=u?`盤點時直接數「${u}」。`:"";
+  else if(!(cp>0)){h.style.color="var(--alert)";h.textContent=`要填 1 ${cu} 裡有幾${u||"個"}。`;}
+  else h.textContent=`盤點時填「幾${cu}」，系統自己換成 ${u}（數 3 ${cu} ＝ ${(3*cp).toLocaleString()} ${u||""}）。`;
 }
 /* 叫貨單位：廠商論箱、論卷、論斤賣，庫存卻是一個一個、一克一克記。
    填了之後叫貨頁會寫「叫 2 箱」，到貨時自動換回庫存單位。 */
@@ -1688,6 +1710,9 @@ async function saveItemEdit(){
   const cost=parseFloat($("#it-cost").value)||0, avg=parseFloat($("#it-avg").value)||0;
   const supplier=$("#it-supplier").value.trim()||"—";
   const ouEditable=!$("#it-ou").disabled;
+  let cu=$("#it-cu").value.trim(); const cp=parseFloat($("#it-cp").value);
+  if(cu===itSel.unit) cu="";
+  if(cu && !(cp>0)){toast(`填 1 ${cu} 裡有幾${itSel.unit}，或把盤點單位清空`);return;}
   let ou=$("#it-ou").value.trim(); const op=parseFloat($("#it-op").value);
   if(ou===itSel.unit) ou="";
   if(ouEditable && ou && !(op>0)){toast(`填 1 ${ou} 裡有幾${itSel.unit}，或把叫貨單位清空`);return;}
@@ -1714,6 +1739,7 @@ async function saveItemEdit(){
     };
     // 等貨中不帶這兩個 key，後端就保留原值
     if(ouEditable){ p_item.order_unit=ou||null; p_item.order_pack=ou?op:null; }
+    p_item.count_unit=cu||null; p_item.count_pack=cu?cp:null;
     await callRpc("erp_save_item",{p_item});
     // 庫存欄有動 → 寫成一筆盤點調整（庫存是帳，不能直接覆蓋數字）
     const curBal=prev?prev.bal:0;
@@ -2357,6 +2383,7 @@ let stocktakeVals={};
    庫存和配方照樣存基本單位，這裡只換輸入和顯示，成本完全不受影響。*/
 const ST_PACK_UNITS=["瓶","包","罐","袋","捲","條","盒"];
 function stPack(it){
+  if(it.countUnit && it.countPack>0) return {u:it.countUnit, k:it.countPack};
   if(it.tea) return {u:"包", k:it.packG};
   if(it.orderPack>1 && it.orderUnit && it.orderUnit!==it.unit
      && ST_PACK_UNITS.includes(it.orderUnit)) return {u:it.orderUnit, k:it.orderPack};
