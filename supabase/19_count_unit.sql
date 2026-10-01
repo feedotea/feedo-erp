@@ -153,6 +153,11 @@ update erp_items set count_unit = '瓶', count_pack = 3846.25, updated_at = now(
 update erp_items set count_unit = '包', count_pack = 2000, updated_at = now()
  where code = 'SUG-01';          -- 飛燕煉奶：一箱 2kg×8包 ＝ 16,000g
 
+-- 紙杯：一箱 1,000 個（2026-10-01 老闆確認，14_packaging 當時只是暫定）。
+-- 盤點數 25,159 個不可能，數箱子就好；用剩的那箱填小數（例如 25.2）。
+update erp_items set count_unit = '箱', count_pack = 1000, updated_at = now()
+ where code = 'PKG-01';
+
 commit;
 
 -- 驗證
