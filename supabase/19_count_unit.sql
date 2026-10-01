@@ -158,6 +158,11 @@ update erp_items set count_unit = '包', count_pack = 2000, updated_at = now()
 update erp_items set count_unit = '箱', count_pack = 1000, updated_at = now()
  where code = 'PKG-01';
 
+-- 吸管：一箱 5,000 支、一箱 5 包 → 一包 1,000 支（2026-10-01 老闆確認並自己在 App 裡設的）。
+-- 數「包」比數「箱」實際：拆開的那箱直接數剩幾包。
+update erp_items set count_unit = '包', count_pack = 1000, updated_at = now()
+ where code = 'PKG-03';
+
 commit;
 
 -- 驗證
