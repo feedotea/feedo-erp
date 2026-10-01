@@ -340,10 +340,10 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   <div style="display:flex;gap:8px;margin-bottom:12px">
     <button class="mini-btn" style="flex:1;border-color:var(--ink);color:var(--ink)" id="btn-new-item" onclick="openItemEdit(null)">＋ 新增品項</button>
   </div>
+  <div class="sec-eyebrow">最近損耗 · 30 天</div>
+  <div class="card" id="waste-recent" style="margin-bottom:14px"></div>
   <div class="cat-tab" id="cat-tabs"></div>
   <div class="card" id="inv-list"></div>
-  <div class="sec-eyebrow" style="margin-top:16px">最近損耗 · 30 天</div>
-  <div class="card" id="waste-recent"></div>
   <div class="scroll-hint"></div>
 </div>
 
@@ -2467,11 +2467,12 @@ async function loadWaste(){
   renderWaste(rows||[]);
 }
 function wasteEmpty(t){ return `<div class="empty"><div class="ic">🗑</div><div class="t">${t}</div></div>`; }
+const WASTE_SHOW=8;
 function renderWaste(rows){
   const box=$("#waste-recent");
   if(!rows.length){ box.innerHTML=wasteEmpty("這 30 天沒有記過損耗"); return; }
   box.innerHTML="";
-  rows.forEach(r=>{
+  rows.slice(0,WASTE_SHOW).forEach(r=>{
     const row=document.createElement("div"); row.className="inv-row";
     const amt=(r.cost!==null&&r.cost!==undefined)?`<div class="u">${money(r.cost)}</div>`:"";
     row.innerHTML=`<span class="dot r"></span>
@@ -2480,10 +2481,11 @@ function renderWaste(rows){
     box.appendChild(row);
   });
   const total=rows.reduce((s,r)=>s+(+r.cost||0),0);
-  if(total>0){
+  const more=rows.length>WASTE_SHOW ? `（共 ${rows.length} 筆，只列最近 ${WASTE_SHOW} 筆）` : "";
+  if(total>0||more){
     const sum=document.createElement("div"); sum.className="inv-row";
-    sum.innerHTML=`<div class="nm" style="color:var(--grey);font-weight:400">30 天損耗合計</div>
-      <div class="bal"><div class="b low">${money(total)}</div></div>`;
+    sum.innerHTML=`<div class="nm" style="color:var(--grey);font-weight:400">30 天損耗合計${more}</div>
+      <div class="bal"><div class="b low">${total>0?money(total):""}</div></div>`;
     box.appendChild(sum);
   }
 }
