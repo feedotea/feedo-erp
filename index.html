@@ -366,7 +366,7 @@ select.txt-input{appearance:none;-webkit-appearance:none}
       <div class="field" style="flex:1"><label>安全庫存 <span class="it-u"></span></label><input class="txt-input" id="it-safe" type="number" inputmode="decimal" placeholder="0"></div>
     </div>
     <div style="display:flex;gap:10px">
-      <div class="field" style="flex:1"><label>進貨成本 <span class="it-u-cost" style="color:var(--alert)"></span></label><input class="txt-input" id="it-cost" type="number" inputmode="decimal" step="0.0001" placeholder="0">
+      <div class="field" style="flex:1"><label>進貨成本 <span class="it-u-cost" style="color:var(--alert)"></span></label><input class="txt-input" id="it-cost" type="number" inputmode="decimal" step="0.0001" placeholder="0" oninput="updateCostWarn()">
         <div id="it-cost-help" style="font-size:10px;color:var(--grey);margin-top:4px;line-height:1.5"></div></div>
       <div class="field" style="flex:1"><label>一天約用量 <span class="it-u"></span><small style="color:var(--grey);font-weight:400"> · 手填預估</small></label><input class="txt-input" id="it-avg" type="number" inputmode="decimal" placeholder="0">
         <div id="it-avg-hint" style="font-size:10px;color:var(--ok);margin-top:4px;display:none"></div></div>
@@ -1670,6 +1670,27 @@ const UNIT_EG={
   L:"例：一桶 5 L 賣 $400 → 400 ÷ 5 ＝ 80",
   kg:"例：一包 25 kg 賣 $1,000 → 1000 ÷ 25 ＝ 40"
 };
+/* 成本填錯是這套系統最貴的一種錯：九月物料成本一度變成 367 萬，
+   就是鮮奶油的「每 ml 多少錢」被填成 205（那是一瓶的價錢）。
+   ml／g 這種細單位，成本超過 5 元幾乎一定是把整瓶整包的價錢填進來了。*/
+const FINE_UNITS=["ml","g"], COST_MAX_FINE=5;
+function costLooksWrong(){
+  const u=itSel.unit, c=parseFloat($("#it-cost").value);
+  if(!FINE_UNITS.includes(u) || !(c>COST_MAX_FINE)) return null;
+  const pack=parseFloat($("#it-op").value)||parseFloat($("#it-cp").value)||0;
+  return {unit:u, cost:c, pack, suggest: pack>0 ? Math.round(c/pack*1000000)/1000000 : null};
+}
+function updateCostWarn(){
+  const h=$("#it-cost-help"); if(!h) return;
+  const w=costLooksWrong();
+  if(!w){ h.style.color="var(--grey)"; h.textContent=itSel.unit?(UNIT_EG[itSel.unit]||`買一整箱的話：總價 ÷ 箱裡有幾${itSel.unit}`):""; return; }
+  h.style.color="var(--alert)";
+  const perBottle=Math.round(w.cost*1000).toLocaleString();
+  h.innerHTML=`⚠ ${w.cost} 元/${w.unit} 等於一瓶（1,000${w.unit}）要 <b>${perBottle}</b> 元。`
+    + `是不是把「一瓶／一包多少錢」填進來了？這一格要填<b>每 1 ${w.unit} 多少錢</b>。`
+    + (w.suggest!==null?`<br><button type="button" class="mini-btn" style="margin-top:4px" onclick="fixCost(${w.suggest})">改成 ${w.suggest}（${w.cost} ÷ ${w.pack}）</button>`:"");
+}
+function fixCost(v){ $("#it-cost").value=v; updateCostWarn(); }
 function openItemChips(){
   [...$("#it-cats").children].forEach(b=>b.classList.toggle("on",b.textContent===itSel.cat));
   [...$("#it-units").children].forEach(b=>b.classList.toggle("on",b.textContent===itSel.unit));
@@ -1679,6 +1700,7 @@ function openItemChips(){
   if(c) c.textContent=u?`（每 1 ${u} 多少錢）`:"（先選單位）";
   const h=$("#it-cost-help");
   if(h) h.textContent=u?(UNIT_EG[u]||`買一整箱的話：總價 ÷ 箱裡有幾${u}`):"";
+  updateCostWarn();
   updateOrderUnitHint();
   updateCountUnitHint();
 }
@@ -1734,6 +1756,8 @@ async function saveItemEdit(){
     const nums=items.filter(x=>x.code.startsWith(prefix)).map(x=>parseInt(x.code.split("-")[1])||0);
     code=`${prefix}-${String((Math.max(0,...nums)+1)).padStart(2,"0")}`;
   }
+  const warn=costLooksWrong();
+  if(warn && !confirm(`成本填 ${warn.cost} 元/${warn.unit}，等於一瓶（1,000${warn.unit}）要 ${Math.round(warn.cost*1000).toLocaleString()} 元。\n\n確定要這樣存嗎？`)) return;
   const prev=items.find(i=>i.code===code);
   const wasNew=!editingCode;
 
