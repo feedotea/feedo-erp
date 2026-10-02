@@ -462,8 +462,7 @@ select.txt-input{appearance:none;-webkit-appearance:none}
 <div class="screen hidden" id="scr-stocktake">
   <div class="date-bar"><span>月度盤點</span>
     <span style="display:flex;gap:8px">
-      <button class="mini-btn" onclick="printCountSheet(false)">🖨 空白盤點單</button>
-      <button class="mini-btn" onclick="printCountSheet(true)">🖨 含庫存</button>
+      <button class="mini-btn" onclick="printCountSheet()">🖨 列印盤點單</button>
       <button class="mini-btn" onclick="nav('inv')">← 回庫存</button></span></div>
   <div style="font-size:12px;color:var(--grey);line-height:1.6;margin-bottom:12px">
     實際數一次庫存填進去，系統算出跟帳面的差額並寫成一筆調整。<br>
@@ -2426,10 +2425,11 @@ let stocktakeVals={};
    只認單罐單包的叫貨單位；「箱」不算，0.75 箱比 2800ml 更難填。
    庫存和配方照樣存基本單位，這裡只換輸入和顯示，成本完全不受影響。*/
 const ST_PACK_UNITS=["瓶","包","罐","袋","捲","條","盒"];
-/* 盤點單：印出去給店員拿著數。
-   預設不印帳面數字 —— 看得到系統有多少，人就會照抄，盤點就失去意義了。
-   但自己要核對、或想知道哪裡差很多的時候，印「含庫存」那版比較快。*/
+/* 盤點單：印出去給店員拿著數，帶著系統現有數量方便核對。
+   （本來還有一版不印數字的——怕看到帳面就照抄——老闆說用不到，拿掉了。
+     哪天想盤得更嚴謹，呼叫 printCountSheet(false) 就是空白版。）*/
 function printCountSheet(showStock){
+  if(showStock===undefined) showStock=true;
   const d=new Date(), wk=["日","一","二","三","四","五","六"][d.getDay()];
   const dateStr=`${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}（${wk}）`;
   const CAT_ORDER=["茶葉","乳品","糖類","配料","調味","包材","周邊"];
