@@ -748,6 +748,7 @@ function mapItem(v){
     avgPerDay: Number(v.avg_per_day), avgIsActual: !!v.avg_is_actual,
     avgManual: Number(v.avg_per_day_manual),
     posRole: v.pos_role || null,
+    isBlend: !!v.is_blend,
     countUnit: v.count_unit || null,
     countPack: Number(v.count_pack) || 0,
     orderUnit: v.order_unit || null,
@@ -827,6 +828,7 @@ function coverDaysLeft(it){
   return (stockOf(it) + (it.onOrderQty||0)) / it.avgPerDay;
 }
 function needsOrder(it){
+  if(it.isBlend) return false;          // 茶桶叫不了貨，要叫的是裡面的茶葉
   const d=coverDaysLeft(it);
   if(d===null) return it.bal<=it.safe;
   return d <= it.leadDays + ORDER_BUFFER_DAYS;
@@ -2432,7 +2434,7 @@ function printCountSheet(showStock){
   const dateStr=`${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}（${wk}）`;
   const CAT_ORDER=["茶葉","乳品","糖類","配料","調味","包材","周邊"];
   const groups={};
-  items.forEach(i=>{(groups[i.cat]=groups[i.cat]||[]).push(i);});
+  items.filter(i=>!i.isBlend).forEach(i=>{(groups[i.cat]=groups[i.cat]||[]).push(i);});
   const cats=Object.keys(groups).sort((a,b)=>{
     const x=CAT_ORDER.indexOf(a), y=CAT_ORDER.indexOf(b);
     return (x<0?99:x)-(y<0?99:y);
@@ -2500,7 +2502,8 @@ function stToBase(it,v){ const p=stPack(it); return p.k===1 ? v : v*p.k; }
 function renderStocktake(){
   const box=$("#stocktake-list"); if(!box) return;
   box.innerHTML="";
-  items.forEach(it=>{
+  // 茶桶（拼茶）沒有實體庫存，數的是裡面的茶葉，列出來只會讓人不知道要填什麼
+  items.filter(i=>!i.isBlend).forEach(it=>{
     const u=stUnit(it), sys=stSys(it);
     const prev=stocktakeVals[it.code];
     const row=document.createElement("div");row.className="st-row";
@@ -2532,7 +2535,7 @@ function calcDiff(code){
 async function submitStocktake(){
   if(!canWrite())return;
   let n=0;const rows=[];const lines=[];
-  items.forEach(it=>{
+  items.filter(i=>!i.isBlend).forEach(it=>{
     const v=stocktakeVals[it.code];
     if(v===undefined||isNaN(v))return;
     const base=stToBase(it,v);
