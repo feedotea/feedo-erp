@@ -2472,7 +2472,7 @@ function printCountSheet(showStock){
   @media print{.noprint{display:none}tr{break-inside:avoid}}
   button{margin-top:18px;padding:12px 24px;background:#1A1A1A;color:#fff;border:none;border-radius:3px;font-size:14px;cursor:pointer}
   </style></head><body>
-  <div class="head"><div class="corner">月度盤點</div><div class="title">${dateStr} 盤點單${showStock?"（含庫存）":""}</div></div>
+  <div class="head"><div class="corner">月度盤點</div><div class="title">${dateStr} 盤點單</div></div>
   <table>
     <tr><th>品項</th><th>數什麼</th>${showStock?"<th>系統現有</th>":""}<th>實際數量</th><th>換算</th></tr>
     ${rows}
@@ -2481,7 +2481,7 @@ function printCountSheet(showStock){
   <div class="hint">
     ・「數什麼」那一欄寫什麼就數什麼，不用自己換算成公克毫升。<br>
     ・沒數到的留白，回系統時也留白，那一項就不會被動到。<br>
-    ・${showStock?"「系統現有」只是參考，<b>看到數字容易照抄</b>，要認真盤請印空白那版。":"這張刻意沒印系統現有的數量 —— 先數再比對，才看得出哪裡不對。"}
+    ・${showStock?"「系統現有」只是參考 —— <b>先自己數完再看</b>，照抄的話盤點就白做了。":"這張刻意沒印系統現有的數量 —— 先數再比對，才看得出哪裡不對。"}
   </div>
   <button class="noprint" onclick="window.print()">列印 / 存成 PDF</button>
   </body></html>`);
