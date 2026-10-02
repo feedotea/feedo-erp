@@ -36,6 +36,9 @@ revoke all on erp_tea_blends from anon;
 -- 1) TEA-01 是拼茶裡的另一半（成本 400 元/斤 ＝ 金萱的價），改成原料、不再單獨煮。
 --    名字老闆要留「紅烏龍」（店裡本來就這樣叫），所以只改 is_tea，不改名。
 update erp_items set is_tea = false, updated_at = now() where code = 'TEA-01';
+-- 變成原料之後就不走「茶葉數包」那條路，盤點會掉回數 g。一包 600g，明寫給它。
+update erp_items set count_unit = '包', count_pack = 600, updated_at = now()
+ where code in ('TEA-01','TEA-11');
 
 -- 2) 三支拼茶放進煮茶頁（一桶 100g；成本是兩支原料按比例的加權，只用來顯示）
 insert into erp_items (code, name, cat, unit, cost, safe_qty, lead_days, cover_days,
