@@ -16,7 +16,7 @@
 -- 冪等：每筆原料的 move id 由「前端給的 id ＋ 原料代號」算出來，
 --   離線佇列重送不會變成兩筆。桶數只記在第一筆，畫面不會算成兩倍。
 --
--- 部署：19/20 之後。可重複執行。
+-- 部署：19/20 之後。可重複執行。2026-10-02 已在正式庫執行。
 -- =====================================================================
 
 begin;
@@ -50,6 +50,12 @@ insert into erp_tea_blends (blend_code, part_code, grams) values
   ('TEA-21','TEA-11',50), ('TEA-21','TEA-01',50),   -- 迎香 ＋ 金萱
   ('TEA-22','TEA-11',75), ('TEA-22','TEA-06',25),   -- 迎香 ＋ 阿薩姆
   ('TEA-23','TEA-03',75), ('TEA-23','TEA-06',25)    -- 小葉紅（機採紅茶）＋ 阿薩姆
+on conflict (blend_code, part_code) do update set grams = excluded.grams;
+
+-- 阿薩姆一包 300g，但一桶也是煮 100g。煮茶原本扣的是 pack_g（一包），會多扣三倍，
+-- 所以給它一條「自己拼自己 100g」的規則，走跟拼茶同一條路。
+-- 其他茶一包剛好就是一桶 100g，不用特別處理。
+insert into erp_tea_blends (blend_code, part_code, grams) values ('TEA-06','TEA-06',100)
 on conflict (blend_code, part_code) do update set grams = excluded.grams;
 
 -- 4) 煮茶：拼茶改扣原料
