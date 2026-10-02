@@ -461,10 +461,13 @@ select.txt-input{appearance:none;-webkit-appearance:none}
 <!-- 盤點 modal -->
 <div class="screen hidden" id="scr-stocktake">
   <div class="date-bar"><span>月度盤點</span>
-    <button class="mini-btn" onclick="nav('inv')">← 回庫存</button></div>
+    <span style="display:flex;gap:8px">
+      <button class="mini-btn" onclick="printCountSheet()">🖨 列印盤點單</button>
+      <button class="mini-btn" onclick="nav('inv')">← 回庫存</button></span></div>
   <div style="font-size:12px;color:var(--grey);line-height:1.6;margin-bottom:12px">
     實際數一次庫存填進去，系統算出跟帳面的差額並寫成一筆調整。<br>
-    茶葉填「幾包」就好（一包 100g），不用秤到公克。只填你數過的，沒填的不動。
+    <b>每一列寫的單位就是要填的單位</b>（幾包、幾瓶、幾條、幾箱），不用換算。只填你數過的，沒填的不動。<br>
+    拿張紙去數比較順的話，按「列印盤點單」印出來，回來再輸入。
   </div>
   <div class="card" id="stocktake-list"></div>
   <div class="scroll-hint"></div>
@@ -2420,6 +2423,65 @@ let stocktakeVals={};
    只認單罐單包的叫貨單位；「箱」不算，0.75 箱比 2800ml 更難填。
    庫存和配方照樣存基本單位，這裡只換輸入和顯示，成本完全不受影響。*/
 const ST_PACK_UNITS=["瓶","包","罐","袋","捲","條","盒"];
+/* 盤點單：印出去給店員拿著數。
+   刻意不印帳面數字 —— 看得到系統有多少，人就會照抄，盤點就失去意義了。*/
+function printCountSheet(){
+  const d=new Date(), wk=["日","一","二","三","四","五","六"][d.getDay()];
+  const dateStr=`${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}（${wk}）`;
+  const CAT_ORDER=["茶葉","乳品","糖類","配料","調味","包材","周邊"];
+  const groups={};
+  items.forEach(i=>{(groups[i.cat]=groups[i.cat]||[]).push(i);});
+  const cats=Object.keys(groups).sort((a,b)=>{
+    const x=CAT_ORDER.indexOf(a), y=CAT_ORDER.indexOf(b);
+    return (x<0?99:x)-(y<0?99:y);
+  });
+  let rows="";
+  cats.forEach(cat=>{
+    rows+=`<tr class="cat"><td colspan="4">${cat}</td></tr>`;
+    groups[cat].forEach(i=>{
+      const p=stPack(i);
+      const conv=p.k===1?"":`1${p.u} = ${p.k.toLocaleString()}${i.unit}`;
+      rows+=`<tr><td class="name">${i.name}</td><td class="u">${p.u}</td>`
+          + `<td class="blank"></td><td class="conv">${conv}</td></tr>`;
+    });
+  });
+  const w=window.open("","_blank");
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>盤點單 ${dateStr}</title>
+  <style>
+  @page{size:A4;margin:14mm}
+  body{font-family:"PingFang TC","Noto Sans TC",sans-serif;padding:0;color:#1A1A1A}
+  .head{display:flex;align-items:stretch;margin-bottom:12px}
+  .head .corner{border:1px solid #1A1A1A;padding:10px 14px;font-weight:700;font-size:13px;display:flex;align-items:center;background:#F2F0EB}
+  .head .title{flex:1;background:#1A1A1A;color:#fff;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;letter-spacing:2px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{border:1px solid #BFBFBF;padding:7px 8px}
+  th{background:#DCE6F1;font-weight:700;font-size:12px}
+  tr.cat td{background:#1A1A1A;color:#fff;font-weight:700;letter-spacing:2px;font-size:12px;padding:5px 10px}
+  td.name{width:46%}
+  td.u{width:12%;text-align:center;font-weight:700}
+  td.blank{width:20%;background:#FCFCFC}
+  td.conv{width:22%;color:#8A8A8A;font-size:11px}
+  .sign{margin-top:14px;font-size:12px;color:#555}
+  .hint{color:#8A8A8A;font-size:11px;margin-top:8px;line-height:1.7}
+  @media print{.noprint{display:none}tr{break-inside:avoid}}
+  button{margin-top:18px;padding:12px 24px;background:#1A1A1A;color:#fff;border:none;border-radius:3px;font-size:14px;cursor:pointer}
+  </style></head><body>
+  <div class="head"><div class="corner">月度盤點</div><div class="title">${dateStr} 盤點單</div></div>
+  <table>
+    <tr><th>品項</th><th>數什麼</th><th>實際數量</th><th>換算</th></tr>
+    ${rows}
+  </table>
+  <div class="sign">盤點人：________________　　完成時間：________________</div>
+  <div class="hint">
+    ・「數什麼」那一欄寫什麼就數什麼，不用自己換算成公克毫升。<br>
+    ・沒數到的留白，回系統時也留白，那一項就不會被動到。<br>
+    ・這張刻意沒印系統現有的數量 —— 先數再比對，才看得出哪裡不對。
+  </div>
+  <button class="noprint" onclick="window.print()">列印 / 存成 PDF</button>
+  </body></html>`);
+  w.document.close();
+  toast("已產生盤點單");
+}
 function stPack(it){
   if(it.countUnit && it.countPack>0) return {u:it.countUnit, k:it.countPack};
   if(it.tea) return {u:"包", k:it.packG};
