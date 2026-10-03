@@ -944,6 +944,9 @@ function renderCap(){
   const sub = made
     ? `倒掉 ${dumped} 杯${rate!==null?` · 浪費 ${rate}%`:""}`
     : "今天還沒記";
+  const half=Math.round(CAP_POT_CUPS/2*10)/10, one=Math.round(CAP_POT_CUPS*10)/10;
+  // 直接填杯數是主要的做法（老闆：「打杯數比較方便」）；
+  // 鍋那兩顆留著當捷徑 —— 現場剛打完一鍋，按一下比打字快
   box.innerHTML=
     `<div class="tea-row">
        <div style="flex:1;min-width:0">
@@ -953,11 +956,24 @@ function renderCap(){
        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
          <span class="brew-count ${made?'':'zero'}">${made||0}</span>
          ${last?`<button class="brew-undo" id="cap-undo" title="收回">↶</button>`:''}
-         <button class="brew-btn brew-half" id="cap-half">半鍋</button>
-         <button class="brew-btn" id="cap-one">＋1 鍋</button>
+         <input id="cap-cups" type="number" inputmode="decimal" min="0" step="0.5" placeholder="杯"
+                style="width:62px;text-align:center;padding:7px 4px">
+         <button class="brew-btn" id="cap-add">記</button>
        </div>
+     </div>
+     <div style="display:flex;gap:6px;justify-content:flex-end;padding:0 12px 10px">
+       <button class="brew-btn brew-half" id="cap-half">半鍋 ${half} 杯</button>
+       <button class="brew-btn brew-half" id="cap-one">1 鍋 ${one} 杯</button>
      </div>`;
   if(last) $("#cap-undo").onclick=()=>undoCap(last.id);
+  const inp=$("#cap-cups");
+  const addTyped=()=>{
+    const v=parseFloat(inp.value);
+    if(!v||v<=0){ toast("填杯數"); inp.focus(); return; }
+    inp.value=""; tapCap(v);
+  };
+  $("#cap-add").onclick=addTyped;
+  inp.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); addTyped(); } };
   $("#cap-half").onclick=()=>tapCap(CAP_POT_CUPS/2);
   $("#cap-one").onclick =()=>tapCap(CAP_POT_CUPS);
 }
