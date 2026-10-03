@@ -26,3 +26,20 @@ update erp_items set brew_ml_per_g = 40, updated_at = now() where cat = '茶葉'
 -- erp_v_items 要把它回給前端（加在最後面，create or replace 不會噴）
 -- 完整定義見 21_tea_blends.sql 之後的版本；這裡只補這一欄。
 -- select code, name, brew_ml_per_g from erp_v_items where cat='茶葉' order by code;
+
+-- ---------------------------------------------------------------------
+-- 2026-10-03：成本也照 1:40 算（老闆）。
+-- 原因是冷泡加冰塊，出杯的茶湯就是 1g:40ml，三支按 1:25 算的配方偏高。
+--   純茶 360ml ÷ 40 ÷ 0.95 = 9.4737g（原 15.1579）
+--   奶茶 240ml ÷ 40 ÷ 0.95 = 6.3158g（原 10.1053）
+-- 影響（9 列配方、5 支飲料）：
+--   四季春烏龍     成本 16.07 → 12.26   毛利 68% → 75%
+--   茉莉綠茶       成本 14.71 → 11.41   毛利 71% → 77%
+--   青心烏龍       成本 27.44 → 19.37   毛利 54% → 68%  ← 原本全菜單最低的一支
+--   四季春鮮奶茶   成本 19.57 → 17.04   毛利 70% → 74%
+--   茉莉綠鮮奶茶   成本 18.67 → 16.47   毛利 71% → 75%
+-- ---------------------------------------------------------------------
+update erp_recipes r set qty = 9.4737
+  from erp_items i where i.code = r.item_code and i.cat = '茶葉' and r.qty = 15.1579;
+update erp_recipes r set qty = 6.3158
+  from erp_items i where i.code = r.item_code and i.cat = '茶葉' and r.qty = 10.1053;
