@@ -284,6 +284,8 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   </div>
   <div class="seg-tabs" id="seg-tabs" style="display:none"></div>
   <div class="card" id="brew-list"></div>
+  <div class="sec-eyebrow">奶蓋 · 打了幾杯</div>
+  <div class="card" id="cap-box"></div>
   <div id="brew-pending" style="font-size:11px;color:var(--grey);letter-spacing:.5px;text-align:center;padding:8px 0;min-height:26px"></div>
   <div id="rev-box">
   <div class="sec-eyebrow">打烊 · 今日營收</div>
@@ -919,6 +921,66 @@ function renderBrew(){
   renderTodo();
 }
 
+/* 奶蓋打了幾杯。
+   **只登記，不扣料** —— 扣料維持現狀（賣一杯扣一杯配方、倒掉記損耗）。
+   記這個是為了算浪費率：系統原本只看得到兩端（賣掉的、倒掉的），
+   中間「到底打了多少」沒人記，所以不知道該不該改打小鍋。
+   杯數是唯一貫得通的單位：打的、倒的、賣的都用杯，三個數字才比得起來。*/
+let capDay={made:0,dumped:0,rows:[]};
+function capEmpty(t){ return `<div class="empty"><div class="t">${t}</div></div>`; }
+async function loadCapDay(){
+  const box=$("#cap-box"); if(!box) return;
+  if(!dataReady){ box.innerHTML=capEmpty("尚未連上雲端"); return; }
+  try{ capDay=await callRpc("erp_cap_day",{p_name:CAP_NAME,p_date:brewDate||null}); }
+  catch(e){ console.warn("奶蓋讀取失敗",e); box.innerHTML=capEmpty("讀不到，等一下再回這頁"); return; }
+  renderCap();
+}
+function renderCap(){
+  const box=$("#cap-box"); if(!box) return;
+  const made=+capDay.made||0, dumped=+capDay.dumped||0;
+  // 浪費率分母用「打了幾杯」—— 賣掉的要等隔天 POS 才知道，等不了
+  const rate = made>0 ? Math.round(dumped/made*100) : null;
+  const last = (capDay.rows||[]).filter(r=>r.mine||isManager()).slice(-1)[0];
+  const sub = made
+    ? `倒掉 ${dumped} 杯${rate!==null?` · 浪費 ${rate}%`:""}`
+    : "今天還沒記";
+  box.innerHTML=
+    `<div class="tea-row">
+       <div style="flex:1;min-width:0">
+         <div class="tea-name">${CAP_NAME}</div>
+         <div class="tea-sub"${rate!==null&&rate>=20?' style="color:var(--alert);font-weight:600"':''}>${sub}</div>
+       </div>
+       <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+         <span class="brew-count ${made?'':'zero'}">${made||0}</span>
+         ${last?`<button class="brew-undo" id="cap-undo" title="收回">↶</button>`:''}
+         <button class="brew-btn brew-half" id="cap-half">半鍋</button>
+         <button class="brew-btn" id="cap-one">＋1 鍋</button>
+       </div>
+     </div>`;
+  if(last) $("#cap-undo").onclick=()=>undoCap(last.id);
+  $("#cap-half").onclick=()=>tapCap(CAP_POT_CUPS/2);
+  $("#cap-one").onclick =()=>tapCap(CAP_POT_CUPS);
+}
+async function tapCap(cups){
+  if(!canWrite())return;
+  const c=Math.round(cups*10)/10;
+  capDay.made=(+capDay.made||0)+c;                    // 先畫出來，不要等雲端
+  capDay.rows=(capDay.rows||[]).concat([{id:null,cups:c,mine:true}]);
+  renderCap();
+  const id=uuid();
+  const sent=await push("erp_cap_log_add",{p_id:id,p_cups:c,p_date:brewDate||null});
+  await loadCapDay();                                  // 用雲端的數字蓋回去，才不會算兩次
+  toast(`${CAP_NAME} ＋${c} 杯`+(sent?"":"　⚠ 待同步"));
+}
+async function undoCap(id){
+  if(!canWrite())return;
+  if(!id){ toast("這筆還沒存上去，等一下再收回"); return; }
+  try{ await callRpc("erp_cap_log_del",{p_id:id}); }
+  catch(e){ toast(e.message||"收不回來，請重試"); return; }
+  await loadCapDay();
+  toast(`已收回一筆 ${CAP_NAME}`);
+}
+
 function updateBrewPending(){
   const n=Object.values(brewToday).reduce((a,b)=>a+(b||0),0);
   const el=$("#brew-pending");
@@ -986,6 +1048,7 @@ function onBrewDateChange(){
     $("#brew-date-label").textContent=`補登：${v.slice(5)} 星期${wk}`;
     bar.classList.add("back");
   }
+  loadCapDay();          // 奶蓋也跟著換日子，不然補登時看到的是今天的數字
 }
 function updateLogReminder(){ updateBrewPending(); }
 
@@ -2656,7 +2719,7 @@ async function submitComboWaste(q){
       p_id:uuid(),p_code:it.code,p_kind:"waste",p_qty:qty,p_note:note,p_date:d});
     if(!ok) sent=false;
   }
-  closeModal('waste');renderInv();renderOrder();renderBrew();refreshSummary();loadWaste();
+  closeModal('waste');renderInv();renderOrder();renderBrew();refreshSummary();loadWaste();loadCapDay();
   const back=d!==localDate()?`${d.slice(5)} `:"";
   toast(`${back}${CAP_NAME}倒掉 ${q}${unit}（${wasteState.reason}）`+(sent?"":"　⚠ 待同步"));
   if(sent)resyncIfClean();
@@ -3596,6 +3659,7 @@ function nav(scr){
   if(scr==="recon")renderRecon();
   if(scr==="stocktake")renderStocktake();
   if(scr==="inv")loadWaste();
+  if(scr==="brew")loadCapDay();
 }
 
 function renderAll(){
