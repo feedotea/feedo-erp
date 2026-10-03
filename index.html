@@ -491,6 +491,7 @@ select.txt-input{appearance:none;-webkit-appearance:none}
     </div>
     <div class="field"><label>原因</label>
       <div class="chips" id="waste-reasons"></div></div>
+    <div id="waste-err" style="display:none;color:var(--alert);font-size:12px;line-height:1.6;margin:-4px 0 10px"></div>
     <button class="btn-primary" onclick="submitWaste()">記錄損耗</button>
   </div>
 </div>
@@ -2575,20 +2576,17 @@ function openWaste(){
   const back=["周邊","包材"];
   const sorted=[...items].sort((a,b)=>(back.indexOf(a.cat)+1||0)-(back.indexOf(b.cat)+1||0));
   sorted.forEach(i=>{const c=document.createElement("div");c.className="chip";c.textContent=i.name;
-    c.onclick=()=>{wasteState.code=i.code;wasteState.unit=i.unit;[...box.children].forEach(x=>x.classList.remove("on"));c.classList.add("on");
-      $("#waste-unit").textContent="("+(wasteState.unit||i.unit)+")";
-      // 預設帶入品項單位
-      [...$("#waste-units").children].forEach(x=>x.classList.remove("on"));
+    c.onclick=()=>{wasteState.code=i.code;wasteState.combo=null;wasteState.unit=i.unit;
+      [...box.children].forEach(x=>x.classList.remove("on"));c.classList.add("on");
+      wasteErr("");
+      renderWasteUnits(i);          // 單位只留換得過去的，選不到死路
     };box.appendChild(c);});
   addComboChip();
-  const ub=$("#waste-units");ub.innerHTML="";
-  WASTE_UNITS.forEach(u=>{const c=document.createElement("div");c.className="chip";c.textContent=u;
-    c.onclick=()=>{wasteState.unit=u;[...ub.children].forEach(x=>x.classList.remove("on"));c.classList.add("on");
-      $("#waste-unit").textContent="("+u+")";};ub.appendChild(c);});
+  renderWasteUnits(null);
   const rb=$("#waste-reasons");rb.innerHTML="";
   WASTE_REASONS.forEach(r=>{const c=document.createElement("div");c.className="chip";c.textContent=r;
-    c.onclick=()=>{wasteState.reason=r;[...rb.children].forEach(x=>x.classList.remove("on"));c.classList.add("on");};rb.appendChild(c);});
-  $("#waste-qty").value="";
+    c.onclick=()=>{wasteState.reason=r;[...rb.children].forEach(x=>x.classList.remove("on"));c.classList.add("on");wasteErr("");};rb.appendChild(c);});
+  $("#waste-qty").value=""; wasteErr("");
   const dt=$("#waste-date"); dt.value=localDate(); dt.max=localDate();   // 不能記到未來
   $("#modal-waste").classList.remove("hidden");
 }
@@ -2604,13 +2602,14 @@ async function submitWaste(){
   if(!canWrite())return;
   const q=parseFloat($("#waste-qty").value);
   if(wasteState.combo) return submitComboWaste(q);
-  if(!wasteState.code){toast("先選品項");return;}
-  if(!q||q<=0){toast("填數量");return;}
-  if(!wasteState.reason){toast("選原因");return;}
+  if(!wasteState.code){wasteErr("先選一個品項");toast("先選品項");return;}
+  if(!q||q<=0){wasteErr("數量要填大於 0 的數字");toast("填數量");return;}
+  if(!wasteState.reason){wasteErr("還沒選原因（煮壞／過期／試喝…）");toast("選原因");return;}
   const it=items.find(i=>i.code===wasteState.code);
   const unit=wasteState.unit||it.unit;
   const qty=toItemUnit(q,unit,it.unit);
-  if(qty===null){toast(`${unit} 換不成 ${it.unit}，請改用 ${it.unit} 填`);return;}
+  if(qty===null){wasteErr(`${unit} 換不成 ${it.unit} —— ${it.name} 要用「${it.unit}」填`);
+    toast(`${unit} 換不成 ${it.unit}`);return;}
   it.bal=Math.max(0,it.bal-qty);
   const d=$("#waste-date").value||localDate();
   const sent=await push("erp_log_move",{
@@ -2671,6 +2670,31 @@ async function delWaste(r){
   const it=items.find(i=>i.code===r.code); if(it) it.bal=(+it.bal||0)+(+r.qty||0);
   renderInv();renderOrder();renderBrew();refreshSummary();loadWaste();
   toast(`已刪除：${r.name} ${r.qty}${r.unit}`);
+}
+function wasteErr(msg){
+  const e=$("#waste-err"); if(!e) return;
+  e.textContent=msg||""; e.style.display=msg?"block":"none";
+}
+/* 單位只列「換得回品項單位」的那幾個。
+   以前四個固定列出來，選了茶葉又按 ml，送出時只跳一個 toast 說換不過去 ——
+   手機上那個 toast 常常被瀏覽器工具列蓋住，看起來就像「按了沒反應」。*/
+function renderWasteUnits(it){
+  const ub=$("#waste-units"); if(!ub) return;
+  ub.innerHTML="";
+  const base=it?it.unit:null;
+  let list=WASTE_UNITS;
+  if(base){
+    list=[base].concat(WASTE_UNITS.filter(u=>u!==base && toItemUnit(1,u,base)!==null));
+  }
+  list.forEach(u=>{
+    const c=document.createElement("div");
+    c.className="chip"+(u===wasteState.unit?" on":"");
+    c.textContent=u;
+    c.onclick=()=>{wasteState.unit=u;[...ub.children].forEach(x=>x.classList.remove("on"));c.classList.add("on");
+      $("#waste-unit").textContent="("+u+")"; wasteErr("");};
+    ub.appendChild(c);
+  });
+  $("#waste-unit").textContent=base?"("+(wasteState.unit||base)+")":"";
 }
 /* 奶蓋那顆排在最前面：它是最常整鍋倒掉的東西，卻不在品項清單裡 */
 function addComboChip(){
