@@ -218,7 +218,9 @@ select.txt-input{appearance:none;-webkit-appearance:none}
 .scroll-hint{height:1px}
 .modal-overlay{position:fixed;inset:0;top:var(--vvt,0px);height:var(--vvh,100%);background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:flex-end;justify-content:center}
 .modal-overlay.hidden{display:none}
-.modal-sheet{background:var(--news);width:100%;max-width:520px;max-height:min(90vh,100%);overflow-y:auto;border-top:3px solid var(--gilt);border-radius:6px 6px 0 0;padding:18px 18px 30px}
+/* 底下多留一截：LINE／IG 這種 app 內建瀏覽器的工具列會蓋在畫面最下面，
+   送出鍵貼著底邊就按不到（店長的手機上就是這樣，手指按下去都是按到工具列）。*/
+.modal-sheet{background:var(--news);width:100%;max-width:520px;max-height:min(90vh,100%);overflow-y:auto;border-top:3px solid var(--gilt);border-radius:6px 6px 0 0;padding:18px 18px calc(88px + env(safe-area-inset-bottom, 0px))}
 .modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
 .modal-head .serif{font-family:"Cormorant Garamond",Georgia,serif;font-size:22px;font-weight:600}
 .modal-head button{background:none;border:none;font-size:22px;color:var(--grey);cursor:pointer}
@@ -2732,6 +2734,12 @@ function renderWaste(rows){
   if(!vv) return;                       // 舊瀏覽器：維持原本的 100% / 90vh
   const fit = () => {
     const r = document.documentElement.style;
+    /* 手指不小心捏放大的時候，visualViewport 回的是「放大後看得到的那一小塊」。
+       照著縮 modal 的話，送出鍵會被推到畫面外，怎麼捲都按不到（店長的手機就是這樣）。
+       放大時直接放手，讓 modal 回到整頁高度。*/
+    if (Math.abs((vv.scale || 1) - 1) > 0.01) {
+      r.removeProperty("--vvh"); r.removeProperty("--vvt"); return;
+    }
     r.setProperty("--vvh", vv.height + "px");
     r.setProperty("--vvt", vv.offsetTop + "px");
   };
