@@ -751,6 +751,7 @@ function mapItem(v){
     avgManual: Number(v.avg_per_day_manual),
     posRole: v.pos_role || null,
     isBlend: !!v.is_blend,
+    brewMlPerG: Number(v.brew_ml_per_g) || 0,   // 1g 茶葉泡得出幾 ml 茶湯
     countUnit: v.count_unit || null,
     countPack: Number(v.count_pack) || 0,
     orderUnit: v.order_unit || null,
@@ -2592,8 +2593,13 @@ function openWaste(){
 }
 // 損耗填的單位換算成品項單位。換不了就擋下來，
 // 舊版遇到這種情況是「記一筆但不扣庫存」，帳會愈跑愈歪。
-function toItemUnit(qty,fromUnit,itemUnit){
+//
+// 茶葉特別處理：報廢通常是倒掉「茶湯」不是乾茶葉，所以茶可以用 ml 填，
+// 用 brew_ml_per_g（1g 泡得出幾 ml）換回公克。炭焙 40 → 倒 480ml ＝ 12g。
+function toItemUnit(qty,fromUnit,it){
+  const itemUnit=it.unit;
   if(fromUnit===itemUnit) return qty;
+  if(fromUnit==="ml" && it.brewMlPerG>0) return qty/it.brewMlPerG;
   const k=`${fromUnit}>${itemUnit}`;
   const table={"公克>g":1,"g>公克":1,"斤>g":600,"kg>g":1000,"g>kg":0.001};
   return table[k]!==undefined ? qty*table[k] : null;
@@ -2607,14 +2613,16 @@ async function submitWaste(){
   if(!wasteState.reason){wasteErr("還沒選原因（煮壞／過期／試喝…）");toast("選原因");return;}
   const it=items.find(i=>i.code===wasteState.code);
   const unit=wasteState.unit||it.unit;
-  const qty=toItemUnit(q,unit,it.unit);
+  const qty=toItemUnit(q,unit,it);
   if(qty===null){wasteErr(`${unit} 換不成 ${it.unit} —— ${it.name} 要用「${it.unit}」填`);
     toast(`${unit} 換不成 ${it.unit}`);return;}
   it.bal=Math.max(0,it.bal-qty);
   const d=$("#waste-date").value||localDate();
   const sent=await push("erp_log_move",{
     p_id:uuid(),p_code:it.code,p_kind:"waste",p_qty:qty,
-    p_note:`${wasteState.reason}（填 ${q}${unit}）`,p_date:d});
+    p_note:(unit==="ml"&&it.brewMlPerG>0)
+      ? `${wasteState.reason}（倒掉茶湯 ${q}ml ＝ ${Math.round(qty*10)/10}${it.unit}）`
+      : `${wasteState.reason}（填 ${q}${unit}）`,p_date:d});
   closeModal('waste');renderInv();renderOrder();renderBrew();refreshSummary();loadWaste();
   const back=d!==localDate()?`${d.slice(5)} `:"";
   toast(`${back}${it.name} 損耗 ${q}${unit}（${wasteState.reason}）`+(sent?"":"　⚠ 待同步"));
@@ -2678,23 +2686,26 @@ function wasteErr(msg){
 /* 單位只列「換得回品項單位」的那幾個。
    以前四個固定列出來，選了茶葉又按 ml，送出時只跳一個 toast 說換不過去 ——
    手機上那個 toast 常常被瀏覽器工具列蓋住，看起來就像「按了沒反應」。*/
+function unitLabel(u,it){
+  return (u==="ml" && it && it.brewMlPerG>0) ? "(ml 茶湯)" : "("+u+")";
+}
 function renderWasteUnits(it){
   const ub=$("#waste-units"); if(!ub) return;
   ub.innerHTML="";
   const base=it?it.unit:null;
   let list=WASTE_UNITS;
   if(base){
-    list=[base].concat(WASTE_UNITS.filter(u=>u!==base && toItemUnit(1,u,base)!==null));
+    list=[base].concat(WASTE_UNITS.filter(u=>u!==base && toItemUnit(1,u,it)!==null));
   }
   list.forEach(u=>{
     const c=document.createElement("div");
     c.className="chip"+(u===wasteState.unit?" on":"");
     c.textContent=u;
     c.onclick=()=>{wasteState.unit=u;[...ub.children].forEach(x=>x.classList.remove("on"));c.classList.add("on");
-      $("#waste-unit").textContent="("+u+")"; wasteErr("");};
+      $("#waste-unit").textContent=unitLabel(u,it); wasteErr("");};
     ub.appendChild(c);
   });
-  $("#waste-unit").textContent=base?"("+(wasteState.unit||base)+")":"";
+  $("#waste-unit").textContent=base?unitLabel(wasteState.unit||base,it):"";
 }
 /* 奶蓋那顆排在最前面：它是最常整鍋倒掉的東西，卻不在品項清單裡 */
 function addComboChip(){
