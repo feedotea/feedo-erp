@@ -40,3 +40,27 @@ insert into erp_recipes (pos_name, item_code, qty, scale_by_sweet, deduct)
 select p.pos_name, (select code from erp_items where name='巧克力醬' limit 1), 15.0, false, true
   from (select distinct pos_name from erp_pos_sales
          where pos_name like '維也納%' and pos_name like '%巧克力%') p;
+
+-- ---------------------------------------------------------------------
+-- 2026-10-03 續：維也納不賣了，接手的是四葉草系列（＝ ERP 裡的厚奶茶）。
+-- 9/26 建的那兩組是我自己推的（茶湯 240、全糖 60cc 跟甜度縮），
+-- 現在改成配方卡的數字：茶湯 250、3 分糖固定。
+-- 伯爵有厚奶和鮮奶兩個版本，鮮奶那支（伯爵鮮奶茶）本來就有，不動。
+--   阿薩姆厚奶茶 材料 26.50 元 → 售價 95 毛利 72%
+--   伯爵厚奶茶   材料 26.23 元 → 售價 95 毛利 72%
+-- ⚠ 這段還沒執行（SQL editor 當時按 Run 沒反應），要人工貼上去跑。
+-- ---------------------------------------------------------------------
+begin;
+delete from erp_recipes where pos_name in ('阿薩姆厚奶茶','伯爵厚奶茶');
+insert into erp_recipes (pos_name, item_code, qty, scale_by_sweet, deduct) values
+  ('阿薩姆厚奶茶','TEA-06', 6.5789, false, false),
+  ('阿薩姆厚奶茶','MLK-02',22.6804, false, true),
+  ('阿薩姆厚奶茶','PKG-06',18.0000, false, true),
+  ('伯爵厚奶茶','TEA-07', 6.5789, false, false),
+  ('伯爵厚奶茶','MLK-02',22.6804, false, true),
+  ('伯爵厚奶茶','PKG-06',18.0000, false, true);
+commit;
+
+select r.pos_name, round(sum(r.qty*i.cost)::numeric,2) as 材料成本
+  from erp_recipes r join erp_items i on i.code=r.item_code
+ where r.pos_name in ('阿薩姆厚奶茶','伯爵厚奶茶') group by 1 order by 1;
