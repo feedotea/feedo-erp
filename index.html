@@ -2561,21 +2561,28 @@ async function submitStocktake(){
 /* ===== 損耗/報廢 ===== */
 let wasteState={code:null,reason:null,unit:null};
 const WASTE_REASONS=["煮壞","過期","試喝","招待","灑出/摔破","其他"];
-const WASTE_UNITS=["ml","個","公克","斤"];
-/* 奶蓋是一鍋一鍋打的，打完沒賣完就整鍋倒掉 —— 但它不是品項，是四樣材料
-   （鮮奶油／鮮奶／煉乳／海鹽）的組合，所以損耗要按配方拆回去扣。
-   一鍋 618g、一杯 50g（配方匯入的換算依據），所以一鍋 ＝ 12.36 杯。*/
-const CAP_NAME="奶蓋", CAP_POT_CUPS=618/50;
+const WASTE_UNITS=["ml","個","斤"];   // g 由品項自己的單位帶出來，「公克」重複了
+/* 奶蓋是一鍋一鍋打的，打完沒賣完就整鍋倒掉 —— 但它不是品項，是五樣材料
+   （鮮奶油400＋乳酪60＋鮮奶160＋煉乳50＋海鹽8）的組合，所以損耗要按配方拆回去扣。
+   一鍋 678g、一杯 50g，所以一鍋 ＝ 13.56 杯。
+   20_milkcap_cheese.sql 補上乳酪之後是 678，這裡原本還停在 618 —— 選「鍋」會少扣 8.8%。*/
+const CAP_NAME="奶蓋", CAP_POT_CUPS=678/50;
 const CAP_UNITS=["杯","鍋"];
+/* 店員讀不到 erp_recipes_config（那支限店長，而且會回成本），
+   所以奶蓋改走 erp_cap_recipe —— 只回用量不回錢，店長店員都拿得到。*/
+let capRows=null;
+function capRecipe(){ const r=recRows(CAP_NAME); return r.length?r:(capRows||[]); }
 function openWaste(){
   wasteState={code:null,reason:null,unit:null,combo:null};
   const box=$("#waste-items");box.innerHTML="";
   // 配方只有開「飲料配方」時才載，奶蓋那顆要靠它，所以在背景補載一次
-  if(!recData) callRpc("erp_recipes_config").then(d=>{recData=d;
+  if(!capRecipe().length) callRpc("erp_cap_recipe",{p_name:CAP_NAME}).then(d=>{capRows=d||[];
     if(!$("#modal-waste").classList.contains("hidden")) addComboChip();}).catch(()=>{});
-  // 會倒掉的幾乎都是食材；周邊（T-shirt、帽子、杯套）和包材排到最後
+  // 會倒掉的幾乎都是食材；周邊（T-shirt、帽子、杯套）和包材排到最後。
+  // 茶桶（拼茶）排掉 —— 它沒有實體庫存，要倒的是裡面的茶葉，跟叫貨和盤點同一個判斷
   const back=["周邊","包材"];
-  const sorted=[...items].sort((a,b)=>(back.indexOf(a.cat)+1||0)-(back.indexOf(b.cat)+1||0));
+  const sorted=[...items].filter(i=>!i.isBlend)
+    .sort((a,b)=>(back.indexOf(a.cat)+1||0)-(back.indexOf(b.cat)+1||0));
   sorted.forEach(i=>{const c=document.createElement("div");c.className="chip";c.textContent=i.name;
     c.onclick=()=>{wasteState.code=i.code;wasteState.combo=null;wasteState.unit=i.unit;
       [...box.children].forEach(x=>x.classList.remove("on"));c.classList.add("on");
@@ -2635,7 +2642,7 @@ async function submitComboWaste(q){
   if(!wasteState.reason){toast("選原因");return;}
   const unit=wasteState.unit||"杯";
   const cups=unit==="鍋"?q*CAP_POT_CUPS:q;
-  const rows=recRows(CAP_NAME).filter(r=>r.deduct!==false);
+  const rows=capRecipe().filter(r=>r.deduct!==false);
   if(!rows.length){toast("找不到奶蓋配方");return;}
   const d=$("#waste-date").value||localDate();
   const note=`${CAP_NAME} ${wasteState.reason}（倒掉 ${q}${unit}）`;
@@ -2709,9 +2716,9 @@ function renderWasteUnits(it){
 }
 /* 奶蓋那顆排在最前面：它是最常整鍋倒掉的東西，卻不在品項清單裡 */
 function addComboChip(){
-  const box=$("#waste-items"); if(!box||!recData) return;
+  const box=$("#waste-items"); if(!box) return;
   if(box.querySelector(".chip.combo")) return;
-  if(!recRows(CAP_NAME).length) return;              // 沒建奶蓋配方就不給這顆
+  if(!capRecipe().length) return;                    // 沒建奶蓋配方就不給這顆
   const c=document.createElement("div");
   c.className="chip combo"; c.textContent=CAP_NAME+"（整鍋倒掉）";
   c.style.cssText="border-color:var(--ink);font-weight:600";
