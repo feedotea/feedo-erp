@@ -87,9 +87,20 @@ function run() {
 
   let token = null;
   let done = 0;
+  const fails = [];            // 這一輪失敗的檔，最後一起通知
+  const MAX_AGE_DAYS = 30;     // 超過這個天數還匯不進去的，就是永遠匯不進去的
 
   threads.forEach(thread => {
-    let handled = false;
+    // 永遠匯不成的舊信要讓它停下來。那封 5/13 的（解析 100 vs 總表 101）
+    // 從五月失敗到十月，每 15 分鐘重試一次 —— 真正的失敗全被它的錯誤訊息蓋掉，
+    // 執行狀態又永遠是「已完成」，等於整個監控是廢的。
+    const ageDays = (Date.now() - thread.getLastMessageDate().getTime()) / 86400000;
+    if (ageDays > MAX_AGE_DAYS) {
+      Logger.log('舊信略過（' + Math.round(ageDays) + ' 天）：' + thread.getFirstMessageSubject());
+      thread.addLabel(label);
+      return;
+    }
+    let okCount = 0, badCount = 0;
     thread.getMessages().forEach(msg => {
       // 同一封信會夾三個檔。訂單列表拿來匯入，營運總表拿來回頭驗算。
       const atts = msg.getAttachments();
@@ -104,18 +115,25 @@ function run() {
         try {
           const r = importCsv(token, name, att.getBytes(), att.getDataAsString('UTF-8'), summary, cats);
           Logger.log(name + ' → ' + JSON.stringify(r));
-          handled = true;
+          okCount++;
           if (r && r.ok) done++;
         } catch (err) {
+          badCount++;
+          fails.push(name + '\n' + err);
           Logger.log('匯入失敗 ' + name + '：' + err);
           // 失敗就不要打標籤，下次再試
         }
       });
     });
-    if (handled) thread.addLabel(label);
+    // 跨夜報表會被切成兩封夾在同一個會話裡。原本只要有一個檔成功就打標籤，
+    // 另一個失敗的檔從此不會再被試 —— 9/13、9/30、10/01 三次漏匯都是這樣掉的
+    // （10/01 只進了最後那筆 23:30 的外送單 1,390，品項明細只有 22 列）。
+    // 現在全部成功才算處理完，有一個失敗就留著下次再試。
+    if (okCount > 0 && badCount === 0) thread.addLabel(label);
   });
 
-  Logger.log('完成，成功匯入 ' + done + ' 份');
+  Logger.log('完成，成功匯入 ' + done + ' 份' + (fails.length ? '，失敗 ' + fails.length + ' 份' : ''));
+  if (fails.length) alertFails(fails);
 }
 
 // ── Supabase ─────────────────────────────────────────────
@@ -353,6 +371,8 @@ function buildPayload(text) {
   const cTotal = hdr.indexOf('總價');
   const cPaid  = hdr.indexOf('付款時間');
   const cItems = hdr.indexOf('訂單項目');
+  // 準備中的單沒有付款時間，只認付款時間會把一整天濾光（九月漏掉 7 天就是這樣）
+  const cWhenAlt = ['成立時間','建立時間','下單時間'].map(k => hdr.indexOf(k)).filter(i => i >= 0);
   if (cItems < 0 || cTotal < 0 || cPaid < 0) {
     throw new Error('這不是訂單列表（找不到 訂單項目/總價/付款時間 欄）');
   }
@@ -360,8 +380,12 @@ function buildPayload(text) {
   const cKind = hdr.indexOf('訂單類別');
   const dayMap = {}, items = [], orders = [];
   rows.slice(1).forEach(r => {
-    if (cStat >= 0 && r[cStat] && r[cStat] !== '完成') return;   // 取消的不算
-    const m = (r[cPaid] || '').match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    // 只排除「取消」。店裡的單大多停在「準備中」，要求 === '完成' 幾乎全被丟掉
+    if (cStat >= 0 && /取消/.test(r[cStat] || '')) return;
+    // 付款時間優先，沒有就退回成立／建立／下單時間
+    let when = r[cPaid] || '';
+    if (!when) { for (const i of cWhenAlt) { if (r[i]) { when = r[i]; break; } } }
+    const m = when.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
     if (!m) return;
     const d = m[1] + '-' + ('0'+m[2]).slice(-2) + '-' + ('0'+m[3]).slice(-2);
     if (!dayMap[d]) dayMap[d] = { date: d, revenue: 0, orders: 0 };
@@ -443,4 +467,29 @@ function reimportAll() {
     threads.forEach(t => { t.removeLabel(label); n++; });
   } while (threads.length === 100);
   Logger.log('已清除 ' + n + ' 封信的標籤，接下來執行 run() 會重新匯入');
+}
+
+
+/* 匯入失敗要主動講，不能只寫在 Logger。
+   執行狀態永遠是「已完成」、日誌永遠長一樣，所以 9/13、9/30、10/01
+   三次漏匯都是老闆自己看報表覺得怪才發現的。
+   同一個檔一天只寄一次 —— 卡住的話一天會跑 96 次，不然信箱會被塞爆。*/
+function alertFails(fails) {
+  const P = PropertiesService.getScriptProperties();
+  const to = P.getProperty('ALERT_TO') || Session.getEffectiveUser().getEmail();
+  if (!to) { Logger.log('沒有設 ALERT_TO，略過通知'); return; }
+  const today = Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd');
+  const fresh = fails.filter(f => {
+    const k = 'ALERTED_' + f.slice(0, 60).replace(/[^A-Za-z0-9]/g, '_');
+    if (P.getProperty(k) === today) return false;
+    P.setProperty(k, today);
+    return true;
+  });
+  if (!fresh.length) return;
+  GmailApp.sendEmail(to,
+    'FEEDO 微碧匯入失敗 ' + fresh.length + ' 份',
+    '這幾個檔沒有匯進 ERP，那幾天的營收和品項明細會是缺的：\n\n'
+    + fresh.join('\n\n')
+    + '\n\n補法：微碧後台 → 資料查詢 → 訂單列表 → 選那天 → 匯出訂單列表\n'
+    + '　　　ERP 報表頁 → ⬆ 匯入微碧報表');
 }
