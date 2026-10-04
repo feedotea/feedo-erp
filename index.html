@@ -280,6 +280,7 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   <div class="date-bar" id="brew-date-bar">
     <span id="brew-date-label">記錄日期：今天</span>
     <button class="mini-btn" id="brew-back-btn" onclick="showBrewDate()">補登其他天</button>
+    <button class="mini-btn" onclick="openBrewLog()">📋 紀錄</button>
     <input type="date" id="brew-date" style="display:none" onchange="onBrewDateChange()">
   </div>
   <div class="seg-tabs" id="seg-tabs" style="display:none"></div>
@@ -495,6 +496,36 @@ select.txt-input{appearance:none;-webkit-appearance:none}
       <div class="chips" id="waste-reasons"></div></div>
     <div id="waste-err" style="display:none;color:var(--alert);font-size:12px;line-height:1.6;margin:-4px 0 10px"></div>
     <button class="btn-primary" onclick="submitWaste()">記錄損耗</button>
+  </div>
+</div>
+
+<!-- 煮茶紀錄查詢 -->
+<div class="modal-overlay hidden" id="modal-brewlog">
+  <div class="modal-sheet">
+    <div class="modal-head"><span class="serif">煮茶紀錄</span><button onclick="closeModal('brewlog')">✕</button></div>
+    <div class="modal-note">煮茶一直寫得進去，但以前沒有一頁讀得出來。選期間查，可以匯出 CSV。</div>
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+      <input type="date" id="bl-from" style="flex:1;min-width:120px">
+      <span style="color:var(--grey)">～</span>
+      <input type="date" id="bl-to" style="flex:1;min-width:120px">
+      <button class="mini-btn" onclick="loadBrewLog()">查詢</button>
+      <button class="mini-btn" id="bl-export" onclick="exportBrewLog()">⬇ CSV</button>
+    </div>
+    <div id="bl-sum" style="font-size:13px;color:var(--grey);margin-bottom:6px"></div>
+    <div id="bl-body"></div>
+  </div>
+</div>
+
+<!-- 煮茶存檔前的確認 -->
+<div class="modal-overlay hidden" id="modal-brewconfirm">
+  <div class="modal-sheet">
+    <div class="modal-head"><span class="serif" id="bc-title">確認</span><button onclick="closeModal('brewconfirm')">✕</button></div>
+    <div class="modal-note">存進去就會扣庫存，而且刪不掉（要改只能靠月盤點）。先看一眼對不對。</div>
+    <div id="bc-body"></div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="mini-btn" style="flex:1" onclick="closeModal('brewconfirm')">取消</button>
+      <button class="btn-primary" style="flex:2;margin:0" onclick="doBrewSave()">確認存檔</button>
+    </div>
   </div>
 </div>
 
@@ -870,6 +901,20 @@ function tapBrew(code,n){
   t.bal=Math.max(0,t.bal-n*t.packG);            // 畫面立刻反映，可撐天數當場變
   saveBrewDraft(); renderBrew(); scheduleFlush();
 }
+/* 手動打桶數。tapBrew 是累加，這支是直接設定。
+   庫存的樂觀更新要用「差額」回補，不然打三次就扣三次。*/
+function setBrew(code,val){
+  if(!canWrite())return;
+  const t=items.find(i=>i.code===code); if(!t)return;
+  let v=parseFloat(val);
+  if(!isFinite(v)||v<0) v=0;
+  v=Math.round(v*2)/2;                       // 只收到半桶
+  const prev=brewToday[code]||0;
+  if(v===prev){ renderBrew(); return; }
+  brewToday[code]=v;
+  t.bal=Math.max(0,t.bal-(v-prev)*t.packG);
+  saveBrewDraft(); renderBrew(); scheduleFlush();
+}
 function undoBrew(code){
   const cur=brewToday[code]||0; if(cur<=0)return;
   const n=cur>=1?1:0.5;
@@ -878,9 +923,11 @@ function undoBrew(code){
   if(t) t.bal+=n*t.packG;
   saveBrewDraft(); renderBrew(); scheduleFlush();
 }
+/* 不再「停手 8 秒自動存」。老闆要求每一筆都要再確認一次 ——
+   煮茶是直接扣庫存的，手滑多按一下沒人攔得住，存進去只能靠月盤點修。
+   點記照舊存在 localStorage 草稿裡，關掉再開不會不見。*/
 function scheduleFlush(){
   clearTimeout(brewTimer);
-  brewTimer=setTimeout(flushBrew, FLUSH_MS);
   updateBrewPending();
 }
 
@@ -901,10 +948,18 @@ function renderBrew(){
        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
          <span class="brew-count ${n?'':'zero'}">${n||0}</span>
          ${n?`<button class="brew-undo" onclick="undoBrew('${t.code}')" title="收回">↶</button>`:''}
+         <input class="brew-key" type="number" inputmode="decimal" min="0" step="0.5"
+                placeholder="桶" value="${n||''}" data-code="${t.code}">
          <button class="brew-btn brew-half" onclick="tapBrew('${t.code}',0.5)">半桶</button>
          <button class="brew-btn" onclick="tapBrew('${t.code}',1)">＋1 桶</button>
        </div>`;
     box.appendChild(row);
+  });
+  // 手動打桶數：直接設定成那個數字，不是累加（老闆：「輸入值改手動 key」）
+  box.querySelectorAll(".brew-key").forEach(inp=>{
+    const set=()=>{ setBrew(inp.dataset.code, inp.value); };
+    inp.onchange=set;
+    inp.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); inp.blur(); } };
   });
   // 明日預估
   let total=0,parts=[];
@@ -1001,11 +1056,11 @@ function updateBrewPending(){
   const n=Object.values(brewToday).reduce((a,b)=>a+(b||0),0);
   const el=$("#brew-pending");
   const rev=parseFloat(($("#today-rev")||{}).value)||0;
-  if(el) el.textContent = n ? `今天已記 ${n} 桶 · 停手幾秒後自動存檔` : "";
+  if(el) el.textContent = n ? `已點 ${n} 桶 · 還沒存，按下面確認` : "";
   // 沒東西可存就整條收掉，不要留一顆按不動的灰按鈕佔畫面
   const bar=$("#submit-brew");
   const btn=bar && bar.querySelector("button");
-  if(btn && (n||rev)) btn.textContent = n ? `立即存檔（${n} 桶）` : "存今日營收";
+  if(btn && (n||rev)) btn.textContent = n ? `確認並存檔（${n} 桶）` : "存今日營收";
   if(bar && curScreen==="brew") bar.classList.toggle("hidden", !(n||rev));
 }
 
@@ -1040,7 +1095,88 @@ async function flushBrew(){
         (n?`${n} 桶`:"")+(rev>0?`　營收 ${money(rev)}`:"")+(sent?"":"　⚠ 待同步"));
   if(sent)resyncIfClean();
 }
-const submitBrew=flushBrew;   // 底部按鈕沿用同一條路
+const submitBrew=confirmBrew;   // 底部按鈕先跳確認，確認了才走 flushBrew
+
+/* 煮茶紀錄查詢＋匯出。
+   煮茶寫進 erp_stock_moves(kind='brew') 之後，全站沒有一頁讀得出來 ——
+   跟損耗修好之前一樣的毛病，記錯了要等月盤點才會冒出來。*/
+let brewLogRows=[];
+function openBrewLog(){
+  const to=localDate();
+  const d=new Date(); d.setDate(d.getDate()-29);
+  const from=d.toISOString().slice(0,10);
+  $("#bl-to").value=to; $("#bl-from").value=from;
+  $("#modal-brewlog").classList.remove("hidden");
+  loadBrewLog();
+}
+async function loadBrewLog(){
+  const box=$("#bl-body");
+  box.innerHTML=`<div class="empty"><div class="t">讀取中…</div></div>`;
+  $("#bl-sum").textContent="";
+  try{
+    brewLogRows = await callRpc("erp_brew_list",{p_from:$("#bl-from").value, p_to:$("#bl-to").value}) || [];
+  }catch(e){
+    box.innerHTML=`<div class="empty"><div class="ic">⚠</div><div class="t">${eh(e.message||"讀不到")}</div></div>`;
+    return;
+  }
+  renderBrewLog();
+}
+function renderBrewLog(){
+  const box=$("#bl-body");
+  if(!brewLogRows.length){ box.innerHTML=`<div class="empty"><div class="t">這段期間沒有煮茶紀錄</div></div>`; return; }
+  // 一天一組，看得出那天總共煮幾桶
+  const byDay={};
+  brewLogRows.forEach(r=>{ (byDay[r.day]=byDay[r.day]||[]).push(r); });
+  box.innerHTML = Object.keys(byDay).sort().reverse().map(d=>{
+    const rows=byDay[d];
+    const buckets=rows.reduce((a,r)=>a+(+r.buckets||0),0);
+    const cost=rows.reduce((a,r)=>a+(+r.cost||0),0);
+    const wk=["日","一","二","三","四","五","六"][new Date(d).getDay()];
+    return `<div class="bc-row bc-total"><span>${d.slice(5)}（${wk}）</span>`
+         + `<b>${Math.round(buckets*10)/10} 桶${cost?` · ${money(cost)}`:""}</b></div>`
+         + rows.map(r=>`<div class="bc-row" style="font-size:13.5px;color:var(--grey)">`
+             + `<span>${r.blend_name?`${r.blend_name} → `:""}${r.name}</span>`
+             + `<b>${(+r.qty).toLocaleString()} ${r.unit}</b></div>`).join("");
+  }).join("");
+  const tb=brewLogRows.reduce((a,r)=>a+(+r.buckets||0),0);
+  const tc=brewLogRows.reduce((a,r)=>a+(+r.cost||0),0);
+  $("#bl-sum").textContent=`共 ${brewLogRows.length} 筆 · ${Math.round(tb*10)/10} 桶`+(tc?` · 茶葉成本 ${money(tc)}`:"");
+}
+function exportBrewLog(){
+  if(!brewLogRows.length){ toast("沒有資料可以匯出"); return; }
+  const head=["日期","茶桶","原料","桶數","用量","單位","成本","記錄人"];
+  const esc=v=>`"${String(v==null?"":v).replace(/"/g,'""')}"`;
+  const lines=[head.map(esc).join(",")].concat(brewLogRows.map(r=>
+    [r.day, r.blend_name||"", r.name, r.buckets??"", r.qty, r.unit, r.cost??"", r.who].map(esc).join(",")));
+  // BOM 讓 Excel 開中文不亂碼
+  const blob=new Blob(["\ufeff"+lines.join("\n")],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=`煮茶紀錄_${$("#bl-from").value}_${$("#bl-to").value}.csv`;
+  a.click(); URL.revokeObjectURL(a.href);
+  toast(`已匯出 ${brewLogRows.length} 筆`);
+}
+
+/* 存檔前把整筆攤開讓人看一眼。補登和記今天都要，老闆：「直接全改」。*/
+function confirmBrew(){
+  if(!canWrite())return;
+  const rows=teas().map(t=>({t, b:brewToday[t.code]||0})).filter(r=>r.b>0);
+  const rev = isManager() ? parseFloat(($("#today-rev")||{}).value) : NaN;
+  if(!rows.length && !(rev>0)){ toast("還沒點任何桶數"); return; }
+  const d=brewDate||localDate();
+  const wk=["日","一","二","三","四","五","六"][new Date(d).getDay()];
+  const total=rows.reduce((a,r)=>a+r.b,0);
+  $("#bc-title").textContent = brewDate ? `補登 ${d.slice(5)}（星期${wk}）` : `今天 ${d.slice(5)}（星期${wk}）`;
+  $("#bc-body").innerHTML =
+    rows.map(r=>`<div class="bc-row"><span>${r.t.name}</span><b>${r.b} 桶</b></div>`).join("")
+    + (rows.length?`<div class="bc-row bc-total"><span>合計</span><b>${total} 桶</b></div>`:"")
+    + (rev>0?`<div class="bc-row bc-total"><span>今日營收</span><b>${money(rev)}</b></div>`:"");
+  $("#modal-brewconfirm").classList.remove("hidden");
+}
+async function doBrewSave(){
+  closeModal('brewconfirm');
+  await flushBrew();
+}
 
 /* 補登是少數情況，日期框平常收起來，需要才展開 */
 function showBrewDate(){
@@ -1176,7 +1312,16 @@ function generateBrewPDF(){
     .predict{margin-top:0;border:1px solid #BFBFBF;border-top:none;padding:10px 12px;font-weight:700;font-size:15px}
     .predict b{color:#1B3A5C;font-size:18px;margin-left:8px}
     .hint{color:#8A8A8A;font-size:11px;margin-top:12px;line-height:1.6}
-    @media print{.noprint{display:none}}
+    .brew-key{width:52px;text-align:center;padding:6px 2px;font-size:14px;
+  border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink);
+  font-variant-numeric:tabular-nums}
+.brew-key::-webkit-outer-spin-button,.brew-key::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.bc-row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+  padding:9px 0;border-bottom:1px solid var(--line);font-size:15px}
+.bc-row b{font-variant-numeric:tabular-nums}
+.bc-row.bc-total{border-bottom:none;border-top:2px solid var(--ink);margin-top:4px;font-weight:600}
+
+@media print{.noprint{display:none}}
     button{margin-top:20px;padding:12px 24px;background:#1A1A1A;color:#fff;border:none;border-radius:3px;font-size:14px;cursor:pointer}
     </style></head><body>
     <div class="head">
