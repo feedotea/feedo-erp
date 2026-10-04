@@ -193,42 +193,46 @@ body{
   border-bottom:1px solid var(--line);margin-bottom:8px}
 .pl-tbl{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
 .pl-tbl td{padding:7px 0;vertical-align:baseline}
-.pl-tbl td.k{font-size:14.5px}
-.pl-tbl td.k small{display:block;font-size:10.5px;color:var(--grey);letter-spacing:.4px}
-.pl-tbl td.v{text-align:right;font-size:18px;font-weight:600;white-space:nowrap;padding-left:10px}
-.pl-tbl td.p{text-align:right;font-size:12px;color:var(--grey);width:54px;padding-left:10px}
-.pl-tbl tr.hd td{padding-top:13px;font-size:12px;color:var(--grey);letter-spacing:.08em}
-.pl-tbl tr.item td.k{font-size:13.5px;color:var(--grey)}
-.pl-tbl tr.item td.v{font-size:15px;font-weight:400;color:var(--grey)}
-.pl-tbl tr.sub td{border-top:1px solid var(--line);padding-top:9px}
-.pl-tbl tr.sub td.v{font-size:19px;font-weight:700}
-.pl-tbl tr.total td{border-top:2px solid var(--ink);border-bottom:3px double var(--ink);
-  padding:12px 0}
-.pl-tbl tr.total td.k{font-size:15px;font-weight:700}
-.pl-tbl tr.total td.v{font-size:24px;font-weight:700;letter-spacing:-.01em}
-.pl-tbl tr.total td.p{font-size:13px;color:var(--ink);font-weight:600}
-.pl-tbl tr.total.neg td{color:var(--alert)}
-.pl-note{font-size:11.5px;line-height:1.75;background:var(--news);border-left:3px solid var(--warn);
-  padding:8px 10px;margin:10px 0 2px}
+.pl-tbl td.k{font-size:14px;color:var(--silver);letter-spacing:.5px}
+.pl-tbl td.k small{display:block;font-size:10.5px;color:#8d8d8d;letter-spacing:.3px}
+.pl-tbl td.v{text-align:right;font-size:18px;font-weight:600;white-space:nowrap;padding-left:10px;
+  font-family:"Cormorant Garamond",Georgia,serif}
+.pl-tbl td.p{text-align:right;font-size:12px;color:#8d8d8d;width:54px;padding-left:10px}
+.pl-tbl tr.hd td{padding-top:13px;font-size:11.5px;color:#8d8d8d;letter-spacing:.1em}
+.pl-tbl tr.item td.k{font-size:13px;color:#9c9c9c;letter-spacing:.3px}
+.pl-tbl tr.item td.v{font-size:15px;font-weight:400;color:#b5b5b5}
+/* 深色卡上的線要用亮色，用 var(--ink) 會整條看不見 */
+.pl-tbl tr.sub td{border-top:1px solid rgba(255,255,255,.22);padding-top:9px}
+.pl-tbl tr.sub td.k{color:var(--paper)}
+.pl-tbl tr.sub td.v{font-size:20px;font-weight:700}
+.pl-tbl tr.total td{border-top:2px solid rgba(255,255,255,.55);
+  border-bottom:3px double rgba(255,255,255,.55);padding:13px 0}
+.pl-tbl tr.total td.k{font-size:15px;font-weight:700;color:var(--paper);letter-spacing:1px}
+.pl-tbl tr.total td.v{font-size:26px;font-weight:700;color:var(--gilt)}
+.pl-tbl tr.total td.p{font-size:13px;color:var(--gilt)}
+.pl-tbl tr.total.neg td.v,.pl-tbl tr.total.neg td.p{color:var(--alert)}
+.pl-days{font-size:11.5px;color:#8d8d8d;letter-spacing:.06em;padding:0 0 9px;
+  border-bottom:1px solid rgba(255,255,255,.14);margin-bottom:4px}
+.pl-note{font-size:12px;line-height:1.8;background:rgba(200,144,42,.16);
+  border-left:3px solid var(--warn);color:var(--paper);padding:9px 11px;margin:12px 0 2px}
+.pl-note b{color:#fff}
 .pl-x{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
-  font-size:12.5px;color:var(--grey);padding:6px 0;border-top:1px dashed var(--line)}
-.pl-x small{display:block;font-size:10px}
-.pl-x b{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
-.pl-x i{font-style:normal;font-size:11.5px}
+  font-size:12.5px;color:#9c9c9c;padding:8px 0 0;margin-top:10px;
+  border-top:1px dashed rgba(255,255,255,.22)}
+.pl-x small{display:block;font-size:10px;color:#7d7d7d}
+.pl-x b{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--silver)}
 .ms-tog{cursor:pointer;user-select:none}
 .ms-tog span{display:inline-block;font-size:10px;color:var(--grey);margin-right:4px}
-.ms-row{display:grid;grid-template-columns:1fr .95fr .55fr 1fr;gap:6px;align-items:baseline;
-  padding:11px 14px;border-bottom:1px solid var(--line);font-size:15px;font-weight:600;
-  font-variant-numeric:tabular-nums;cursor:pointer}
+.ms-row{padding:11px 14px;border-bottom:1px solid var(--line);cursor:pointer;
+  font-variant-numeric:tabular-nums}
 .ms-row:last-child{border-bottom:none}
-.ms-row span:not(.m){text-align:right}
-.ms-row .m{text-align:left;font-weight:600;cursor:inherit}
-.ms-row .m small,.ms-row span small{display:block;font-size:10px;color:var(--grey);font-weight:400}
-.ms-row .m i{font-style:normal;font-size:9.5px;color:var(--grey);margin-left:5px;font-weight:400}
-.ms-row.ms-hd{font-size:11.5px;color:var(--grey);letter-spacing:.08em;cursor:default;
-  background:var(--news);font-weight:400}
-.ms-row.ms-hd .m{font-weight:400}
 .ms-row.now{background:var(--news)}
+.ms-row .t1{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.ms-row .t1 .m{font-size:15px;font-weight:700}
+.ms-row .t1 .m i{font-style:normal;font-size:10px;color:var(--grey);margin-left:5px;font-weight:400}
+.ms-row .t1 .p{font-size:19px;font-weight:700;white-space:nowrap}
+.ms-row .t2{display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+  font-size:11.5px;color:var(--grey);margin-top:2px}
 .ms-row .neg{color:var(--alert)}
 .exp-item{display:flex;justify-content:space-between;align-items:center;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--paper)}
 .exp-item:last-child{border-bottom:none}
@@ -2280,20 +2284,21 @@ function renderMonthSeries(){
   const box=$("#ms-body"); if(!box||!monthSeries) return;
   const rows=monthSeries.filter(r=>(+r.revenue||0)>0 || (+r.opex||0)>0);
   if(!rows.length){ box.innerHTML=`<div class="empty"><div class="t">還沒有資料</div></div>`; return; }
-  box.innerHTML=
-    `<div class="ms-row ms-hd"><span class="m">月份</span><span>營收</span><span>毛利率</span><span>本期損益</span></div>`
-    + rows.map(r=>{
-        const rev=+r.revenue||0, cogs=+r.cogs||0, opex=+r.opex||0;
-        const gross=rev-cogs, profit=gross-opex;
-        const gp=rev?Math.round(gross/rev*1000)/10:null;
-        const np=rev?Math.round(profit/rev*1000)/10:null;
-        const cur=r.month===curMonth();
-        return `<div class="ms-row${cur?" now":""}" onclick="jumpMonth('${r.month}')">`
-          + `<span class="m">${r.month.slice(5)} 月${cur?"<i>本月</i>":""}<small>${r.days} 天</small></span>`
-          + `<span>${money(rev)}</span>`
-          + `<span>${gp===null?"—":gp+"%"}</span>`
-          + `<span class="${profit<0?"neg":""}">${money(profit)}${np===null?"":`<small>${np}%</small>`}</span></div>`;
-      }).join("");
+  /* 四欄塞不下七位數的金額，最後一欄會被切掉。改成一個月兩行：
+     第一行月份＋本期損益（主角），第二行天數／營收／毛利率（背景資訊）。*/
+  box.innerHTML = rows.map(r=>{
+    const rev=+r.revenue||0, cogs=+r.cogs||0, opex=+r.opex||0;
+    const gross=rev-cogs, profit=gross-opex;
+    const gp=rev?Math.round(gross/rev*1000)/10+"%":"—";
+    const np=rev?Math.round(profit/rev*1000)/10+"%":"";
+    const cur=r.month===curMonth();
+    return `<div class="ms-row${cur?" now":""}" onclick="jumpMonth('${r.month}')">
+        <div class="t1"><span class="m">${r.month.slice(5)} 月${cur?"<i>本月</i>":""}</span>
+          <span class="p ${profit<0?"neg":""}">${money(profit)}</span></div>
+        <div class="t2"><span>${r.days} 天 · 營收 ${money(rev)} · 毛利 ${gp}</span>
+          <span>${np}</span></div>
+      </div>`;
+  }).join("");
 }
 function jumpMonth(m){ viewMonth=m; renderReport(); renderRevenue(); loadMonthReport();
   window.scrollTo({top:0,behavior:"smooth"}); }
