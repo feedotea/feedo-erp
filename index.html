@@ -221,6 +221,11 @@ body{
   border-top:1px dashed rgba(255,255,255,.22)}
 .pl-x small{display:block;font-size:10px;color:#7d7d7d}
 .pl-x b{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--silver)}
+/* 通用的 .hidden —— 整份 CSS 只有 .screen.hidden／.submit-bar.hidden／.tab.hidden／
+   .modal-overlay.hidden 這種有指定元素的，所以 <div class="card hidden"> 的 hidden
+   一直沒有作用：各月損益和煮茶紀錄的每日明細從來沒有真的收起來過。
+   放在最後面，同樣是單一 class 時由後面這條勝出（例如 .card 的 display）。*/
+.hidden{display:none !important}
 .ms-tog{cursor:pointer;user-select:none}
 .ms-tog span{display:inline-block;font-size:10px;color:var(--grey);margin-right:4px}
 .ms-row{padding:11px 14px;border-bottom:1px solid var(--line);cursor:pointer;
