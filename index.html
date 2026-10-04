@@ -190,15 +190,28 @@ body{
 .cat-hint.ok{border-left-color:var(--ok);color:var(--grey)}
 .cat-hint.warn{border-left-color:var(--warn)}
 .pl-days{font-size:11.5px;color:var(--grey);letter-spacing:.06em;padding:0 0 9px;
-  border-bottom:1px solid var(--line);margin-bottom:4px}
-.pl-row .pct{font-size:11.5px;color:var(--grey);font-variant-numeric:tabular-nums;
-  min-width:46px;text-align:right;padding-right:10px}
-.pl-row .k small{color:var(--grey);display:block;font-size:10px;letter-spacing:.5px;font-weight:400}
-.pl-row.profit .pct{color:var(--ink);font-weight:600}
-.pl-row.aside{opacity:.55;border-top:1px dashed var(--line);margin-top:6px}
-.pl-row.cmp{font-size:13px;color:var(--grey)}
+  border-bottom:1px solid var(--line);margin-bottom:8px}
+.pl-tbl{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.pl-tbl td{padding:5px 0;vertical-align:baseline}
+.pl-tbl td.k{font-size:13.5px}
+.pl-tbl td.k small{display:block;font-size:10px;color:var(--grey);letter-spacing:.4px}
+.pl-tbl td.v{text-align:right;font-size:14.5px;white-space:nowrap;padding-left:10px}
+.pl-tbl td.p{text-align:right;font-size:11.5px;color:var(--grey);width:52px;padding-left:10px}
+.pl-tbl tr.hd td{padding-top:11px;font-size:12px;color:var(--grey);letter-spacing:.08em}
+.pl-tbl tr.item td.k{font-size:13px;color:var(--grey)}
+.pl-tbl tr.item td.v{font-size:13.5px;color:var(--grey)}
+.pl-tbl tr.sub td{border-top:1px solid var(--line);font-weight:600;padding-top:7px}
+.pl-tbl tr.total td{border-top:2px solid var(--ink);border-bottom:3px double var(--ink);
+  font-weight:700;font-size:16px;padding:9px 0}
+.pl-tbl tr.total td.p{font-size:12.5px;color:var(--ink)}
+.pl-tbl tr.total.neg td{color:var(--alert)}
 .pl-note{font-size:11.5px;line-height:1.75;background:var(--news);border-left:3px solid var(--warn);
-  padding:8px 10px;margin:8px 0 2px}
+  padding:8px 10px;margin:10px 0 2px}
+.pl-x{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+  font-size:12.5px;color:var(--grey);padding:6px 0;border-top:1px dashed var(--line)}
+.pl-x small{display:block;font-size:10px}
+.pl-x b{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pl-x i{font-style:normal;font-size:11.5px}
 .exp-item{display:flex;justify-content:space-between;align-items:center;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--paper)}
 .exp-item:last-child{border-bottom:none}
 .exp-item .l .n{font-size:14px;font-weight:600}
@@ -586,16 +599,12 @@ select.txt-input{appearance:none;-webkit-appearance:none}
     <button onclick="changeReportMonth(1)" id="rep-next">▶</button>
   </div>
   <div id="rev-gaps" class="hidden" style="border:1.5px solid var(--warn,#B3271E);padding:12px;margin-bottom:14px;font-size:12px;line-height:1.9"></div>
-  <div class="sec-eyebrow">損益 · <span id="rep-month"></span></div>
+  <div class="sec-eyebrow">損益表 · <span id="rep-month"></span></div>
   <div class="pl-card">
     <div class="pl-days" id="pl-days">—</div>
-    <div class="pl-row"><span class="k">營收</span><span class="pct"></span><span class="v" id="pl-rev">—</span></div>
-    <div class="pl-row"><span class="k">物料成本<small>當月實際耗用的料</small></span><span class="pct" id="pl-cogs-p"></span><span class="v" id="pl-cogs">—</span></div>
-    <div class="pl-row"><span class="k">營業開銷<small>房租、水電、人事、雜支…</small></span><span class="pct" id="pl-opex-p"></span><span class="v" id="pl-opex">—</span></div>
-    <div class="pl-row profit"><span class="k">本月利潤</span><span class="pct" id="pl-profit-p"></span><span class="v" id="pl-profit">—</span></div>
+    <table class="pl-tbl" id="pl-tbl"></table>
     <div class="pl-note" id="pl-warn" style="display:none"></div>
-    <div class="pl-row cmp" id="pl-cmp" style="display:none"><span class="k">上個月同期</span><span class="pct" id="pl-cmp-p"></span><span class="v" id="pl-cmp-v">—</span></div>
-    <div class="pl-row aside"><span class="k">本月付給廠商<small>現金流，不是成本，不參與上面的計算</small></span><span class="pct"></span><span class="v" id="pl-paid">—</span></div>
+    <div id="pl-extra"></div>
   </div>
   <div style="display:flex;gap:8px;margin-bottom:14px">
     <button class="mini-btn" style="flex:1" onclick="exportCSV()">匯出 CSV</button>
@@ -2277,59 +2286,62 @@ function renderReport(){
      還沒拿到就先留白，不要拿錯的數字頂著。 */
   const haveCogs = monthReport && monthReport.month===m;
   const cogs = haveCogs ? Number(monthReport.cogs)||0 : null;
-  $("#pl-rev").textContent=mRev?money(mRev):"—";
-  $("#pl-cogs").textContent=haveCogs?money(cogs):"計算中…";
-  $("#pl-paid").textContent=paid?money(paid):"—";
-  $("#pl-opex").textContent=money(opex);
-  /* 金額每個月不一樣，比例才比得起來 —— 物料成本 28.8% 這種才是能拿來判斷的數字。*/
-  const pct=(v)=>mRev?Math.round(v/mRev*1000)/10+"%":"";
-  $("#pl-cogs-p").textContent=haveCogs?pct(cogs):"";
-  $("#pl-opex-p").textContent=pct(opex);
-  let profit=null;
-  if(mRev&&haveCogs){ profit=mRev-cogs-opex;
-    const el=$("#pl-profit");el.textContent=money(profit);el.classList.toggle("neg",profit<0);
-    $("#pl-profit-p").textContent=pct(profit);
-  } else { $("#pl-profit").textContent=mRev?"計算中…":"待營收"; $("#pl-profit-p").textContent=""; }
-
-  /* 有幾天營收、日均多少。沒標天數的話，月初看到的數字會被當成整月。*/
-  /* 幾天營收：本地沒有這個月（翻到載入範圍外）就用後端月報的逐日資料 */
+  /* 一般會計的損益表格式：收入 → 成本 → 毛利 → 費用 → 淨利。
+     毛利那一列是重點 —— 它才是拿來跟同業比的數字，之前整張表沒有。
+     減項用括號、金額右對齊、小計畫線，照會計的習慣來。*/
   const localDays=dailyRevenue.filter(r=>r.date.startsWith(m)).length;
   const days = localDays || ((monthReport && monthReport.month===m && (monthReport.days||[]).length) || 0);
-  $("#pl-days").textContent = days
-    ? `${days} 天 · 日均 ${money(mRev/days)}`
-    : "這個月還沒有營收紀錄";
+  $("#pl-days").textContent = days ? `${days} 天 · 日均 ${money(mRev/days)}` : "這個月還沒有營收紀錄";
 
-  /* 月中一定失真：房租水電是一次記的，營收是一天一天來的。
-     不講的話，月初看到「利潤 4 萬」會以為賺翻，月底才發現不是。*/
+  const pct=v=>mRev?(Math.round(v/mRev*1000)/10).toFixed(1)+"%":"—";
+  const amt=v=>Math.round(v).toLocaleString();
+  const neg=v=>"("+amt(v)+")";
+  const gross = haveCogs ? mRev-cogs : null;
+  const profit = haveCogs ? mRev-cogs-opex : null;
+
+  // 營業費用照類別攤開（廠商貨款不算，它是現金流）
+  const plCat={};
+  monthExp.filter(e=>e.cat!=="廠商貨款").forEach(e=>{ plCat[e.cat]=(plCat[e.cat]||0)+e.amt; });
+  const plCats=Object.keys(plCat).sort((x,y)=>plCat[y]-plCat[x]);
+
+  const row=(k,v,p,cls)=>`<tr class="${cls||''}"><td class="k">${k}</td>`
+    +`<td class="v">${v}</td><td class="p">${p}</td></tr>`;
+
+  $("#pl-tbl").innerHTML =
+      row("營業收入", mRev?amt(mRev):"—", mRev?"100.0%":"—")
+    + row("營業成本<small>當月實際耗用的料</small>", haveCogs?neg(cogs):"計算中…", haveCogs?pct(cogs):"")
+    + row("營業毛利", gross!==null?amt(gross):"—", gross!==null?pct(gross):"", "sub")
+    + row("營業費用", "", "", "hd")
+    + plCats.map(c=>row("　"+c, neg(plCat[c]), pct(plCat[c]), "item")).join("")
+    + (plCats.length?"":row("　（這個月還沒記開銷）","","","item"))
+    + row("　營業費用合計", neg(opex), pct(opex), "sub")
+    + row("本期損益", profit!==null?(profit<0?neg(-profit):amt(profit)):"—",
+          profit!==null?pct(profit):"", "total"+(profit<0?" neg":""));
+
+  /* 月中一定失真：房租水電是一次記的，營收是一天一天來的。*/
   const warn=$("#pl-warn");
-  const isCur = m===curMonth();
-  const dim = new Date(+m.slice(0,4), +m.slice(5,7), 0).getDate();
   if(warn){
-    const mid = isCur && days>0 && days<dim-2 && opex>0;
-    warn.style.display = mid ? "block" : "none";
+    const dim=new Date(+m.slice(0,4), +m.slice(5,7), 0).getDate();
+    const mid = m===curMonth() && days>0 && days<dim-2 && opex>0;
+    warn.style.display = mid?"block":"none";
     if(mid) warn.innerHTML =
-      `⚠ <b>月中的數字會失真</b>：營收只累積了 ${days} 天，但房租水電這些開銷是整個月一次記的。`
-      + `月底才對得起來。`;
+      `⚠ <b>月中的數字會失真</b>：營收只累積了 ${days} 天，但房租水電這些開銷是整個月一次記的。月底才對得起來。`
+      + `<br>想看生意好不好，看上面的<b>日均</b>比較準。`;
   }
 
-  /* 上個月同一個區間，才比得出好壞。*/
-  const cmpRow=$("#pl-cmp");
-  if(cmpRow){
-    const pm=prevMonth(m);
-    const pmDays=dailyRevenue.filter(r=>r.date.startsWith(pm)).sort((a,b)=>a.date.localeCompare(b.date));
-    const sameSpan=pmDays.slice(0,days);
-    const pmRev=sameSpan.reduce((s,r)=>s+r.amt,0);
-    const show = days>0 && sameSpan.length>0;
-    cmpRow.style.display = show ? "" : "none";
-    if(show){
-      $("#pl-cmp-v").textContent=money(pmRev);
-      const d=pmRev?Math.round((mRev-pmRev)/pmRev*100):0;
-      const el=$("#pl-cmp-p");
-      el.textContent=(d>0?"+":"")+d+"%";
-      el.style.color = d>=0 ? "var(--ok)" : "var(--alert)";
-      cmpRow.querySelector(".k").innerHTML=`上個月同期<small>前 ${sameSpan.length} 天</small>`;
-    }
+  /* 上個月同期、付給廠商 —— 補充資訊，不放進損益表本身 */
+  const pm=prevMonth(m);
+  const pmDays=dailyRevenue.filter(r=>r.date.startsWith(pm)).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,days);
+  const pmRev=pmDays.reduce((s,r)=>s+r.amt,0);
+  let extra="";
+  if(days>0 && pmDays.length){
+    const d=pmRev?Math.round((mRev-pmRev)/pmRev*100):0;
+    extra += `<div class="pl-x"><span>上個月同期（前 ${pmDays.length} 天）</span>`
+           + `<b>${money(pmRev)} <i style="color:${d>=0?'var(--ok)':'var(--alert)'}">${d>0?"+":""}${d}%</i></b></div>`;
   }
+  if(paid) extra += `<div class="pl-x"><span>本月付給廠商<small>現金流，不是成本，不在上表內</small></span><b>${money(paid)}</b></div>`;
+  const xb=$("#pl-extra"); if(xb) xb.innerHTML=extra;
+
   // 當月營運（杯數這些來自 POS，跟損益是不同來源，拿不到就留「—」）
   const pos = haveCogs && monthReport.pos ? monthReport.pos : null;
   const setOps=(id,v)=>{const e=$(id); if(e) e.textContent=v;};
