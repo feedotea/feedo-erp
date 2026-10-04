@@ -1124,41 +1124,50 @@ async function loadBrewLog(){
 function renderBrewLog(){
   const box=$("#bl-body");
   if(!brewLogRows.length){ box.innerHTML=`<div class="empty"><div class="t">這段期間沒有煮茶紀錄</div></div>`; return; }
-  /* 一天一組，組裡再按茶桶分。
-     桶數是主角、克數是細節 —— 店裡講的是「煮幾桶」，不是「幾克」。
-     拼茶尤其需要：兩列各 200g 其實是同一次煮的 4 桶（一桶 100g ＝ 迎香 50 ＋ 金萱 50），
-     而且 buckets 只記在其中一列，單看那一列會以為沒記到。*/
+  /* 預設只看「哪天煮了幾桶什麼茶」—— 店裡講的就是這個。
+     克數是對帳才要的，收在展開裡，CSV 照舊兩欄都有。
+     同一支茶一天常常分好幾次登記，所以每一層都要合併，不然會看到
+     「機採紅茶 300g／機採紅茶 150g」兩行一樣的名字。*/
   const byDay={};
   brewLogRows.forEach(r=>{ (byDay[r.day]=byDay[r.day]||[]).push(r); });
   box.innerHTML = Object.keys(byDay).sort().reverse().map(d=>{
     const rows=byDay[d];
-    const buckets=rows.reduce((a,r)=>a+(+r.buckets||0),0);
-    const cost=rows.reduce((a,r)=>a+(+r.cost||0),0);
     const wk=["日","一","二","三","四","五","六"][new Date(d).getDay()];
-    // 拼茶用茶桶當組名，單品茶用自己的名字
-    const byPot={};
-    rows.forEach(r=>{ const k=r.blend_name||r.name; (byPot[k]=byPot[k]||[]).push(r); });
-    const pots=Object.keys(byPot).map(k=>{
-      const rs=byPot[k];
-      const b=rs.reduce((a,r)=>a+(+r.buckets||0),0);
-      const c=rs.reduce((a,r)=>a+(+r.cost||0),0);
-      const isBlend=rs.some(r=>r.blend_name);
-      let html=`<div class="bc-row bl-pot"><span>${k}</span>`
-             + `<b>${Math.round(b*10)/10} 桶${c?`<small> · ${money(c)}</small>`:""}</b></div>`;
-      // 單品茶一桶就一樣東西，再列一次等於重複
-      if(isBlend||rs.length>1){
-        html += rs.map(r=>`<div class="bc-row bl-part">`
-             + `<span>${r.name}</span><b>${(+r.qty).toLocaleString()} ${r.unit}</b></div>`).join("");
-      }
-      return html;
-    }).join("");
+    const dayB=rows.reduce((a,r)=>a+(+r.buckets||0),0);
+    const dayC=rows.reduce((a,r)=>a+(+r.cost||0),0);
+
+    const pots={};
+    rows.forEach(r=>{
+      const k=r.blend_name||r.name;
+      const p=pots[k]=pots[k]||{b:0,c:0,parts:{}};
+      p.b+=(+r.buckets||0); p.c+=(+r.cost||0);
+      const q=p.parts[r.name]=p.parts[r.name]||{qty:0,unit:r.unit};
+      q.qty+=(+r.qty||0);                        // 同一支原料合併
+    });
+
     return `<div class="bc-row bc-total"><span>${d.slice(5)}（${wk}）</span>`
-         + `<b>${Math.round(buckets*10)/10} 桶${cost?` · ${money(cost)}`:""}</b></div>` + pots;
+         + `<b>${num1(dayB)} 桶${dayC?`<small> · ${money(dayC)}</small>`:""}</b></div>`
+         + Object.keys(pots).map(k=>{
+             const p=pots[k];
+             const names=Object.keys(p.parts);
+             // 單品茶一桶就一樣東西，沒有展開的必要
+             const detail = names.length>1 || names[0]!==k;
+             const id="bl"+Math.random().toString(36).slice(2,8);
+             return `<div class="bc-row bl-pot${detail?' bl-can':''}"`
+                  + `${detail?` onclick="document.getElementById('${id}').classList.toggle('hidden')"`:''}>`
+                  + `<span>${detail?'<i class="bl-caret">▸</i>':''}${k}</span>`
+                  + `<b>${num1(p.b)} 桶${p.c?`<small> · ${money(p.c)}</small>`:""}</b></div>`
+                  + (detail?`<div id="${id}" class="hidden">`
+                      + names.map(n=>`<div class="bc-row bl-part"><span>${n}</span>`
+                          + `<b>${Math.round(p.parts[n].qty*10)/10} ${p.parts[n].unit}</b></div>`).join("")
+                      + `</div>`:"");
+           }).join("");
   }).join("");
   const tb=brewLogRows.reduce((a,r)=>a+(+r.buckets||0),0);
   const tc=brewLogRows.reduce((a,r)=>a+(+r.cost||0),0);
-  $("#bl-sum").textContent=`共 ${brewLogRows.length} 筆 · ${Math.round(tb*10)/10} 桶`+(tc?` · 茶葉成本 ${money(tc)}`:"");
+  $("#bl-sum").textContent=`共 ${num1(tb)} 桶`+(tc?` · 茶葉成本 ${money(tc)}`:"")+" · 點茶名看原料";
 }
+const num1=n=>Math.round((+n||0)*10)/10;
 function exportBrewLog(){
   if(!brewLogRows.length){ toast("沒有資料可以匯出"); return; }
   const head=["日期","茶桶","原料","桶數","用量","單位","成本","記錄人"];
@@ -1339,8 +1348,9 @@ function generateBrewPDF(){
 .bc-row.bc-total{border-bottom:none;border-top:2px solid var(--ink);margin-top:4px;font-weight:600}
 .bl-pot{font-size:14.5px;padding-left:10px;border-bottom:none}
 .bl-pot b small{font-weight:400;color:var(--grey)}
-.bl-part{font-size:13px;color:var(--grey);padding:3px 0 3px 28px;border-bottom:none}
-.bl-part+.bl-pot{border-top:1px solid var(--line);margin-top:4px;padding-top:9px}
+.bl-part{font-size:13px;color:var(--grey);padding:3px 0 3px 30px;border-bottom:none}
+.bl-can{cursor:pointer}
+.bl-caret{font-style:normal;color:var(--grey);font-size:11px;margin-right:5px;display:inline-block}
 
 @media print{.noprint{display:none}}
     button{margin-top:20px;padding:12px 24px;background:#1A1A1A;color:#fff;border:none;border-radius:3px;font-size:14px;cursor:pointer}
