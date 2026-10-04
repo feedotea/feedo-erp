@@ -1,0 +1,172 @@
+-- =====================================================================
+-- 32_import_guard.sql — 匯入時跳過「順便夾到」的日子
+--
+-- 10/02 的營收變 75、明細 1 杯，不是漏匯：10/02 當天有匯進去（75 單 22,217），
+-- 是 10/04 早上那封「10/3 18:35 ～ 10/4 18:27」的報表夾了一張 10/02 的單，
+-- erp_pos_import 的「同一天重匯就整批換掉」把 10/02 整天換成那一張。
+-- 9/13、9/30、10/01 是另一種病（尾巴先進、主體失敗），這次是主體先進、尾巴後到。
+--
+-- 規則：檔案裡某天的訂單數不到庫裡已有的一半 → 當夾帶，整天跳過。
+-- 只動 erp_pos_import 內部，簽名不變。有中文字串，LC_ALL=en_US.UTF-8 pbcopy。
+-- 跑完要用 微碧後台 匯出 10/02 的檔重匯一次（Gmail 那封的 hash 已經匯過，不會再匯）。
+-- =====================================================================
+
+create or replace function erp_pos_import(
+  p_id        uuid,
+  p_file_name text,
+  p_file_hash text,
+  p_days      jsonb,
+  p_rows      jsonb,
+  p_source    text default 'weiby',
+  -- 營運總表的品項分析：[{"category":"奶蓋類","name":"...","qty":7,"amount":560}]
+  p_cats      jsonb default null
+) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  uid    uuid := erp_require_manager();
+  dates  date[];
+  d      jsonb;
+  n      int;
+  dfrom  date;
+  dto    date;
+  v_existing uuid;
+  v_import   uuid;
+  tot    numeric := 0;
+  ords   int := 0;
+  skip   date[] := '{}';   -- 這份檔案裡「順便夾到」的日子，不碰
+begin
+  if p_days is null or jsonb_array_length(p_days) = 0 then
+    raise exception '沒有可匯入的營業日' using errcode = '22023';
+  end if;
+
+  n := 0;   -- 只補分類時不會跑到明細那段，先給個值免得回傳 null
+  select id into v_existing from erp_pos_imports
+   where source = p_source and file_hash = p_file_hash;
+
+  select array_agg((x->>'date')::date), min((x->>'date')::date), max((x->>'date')::date),
+         sum((x->>'revenue')::numeric), sum(coalesce((x->>'orders')::int, 0))
+    into dates, dfrom, dto, tot, ords
+    from jsonb_array_elements(p_days) x;
+
+  /* 夾帶日防護（2026-10-04）。
+     微碧的跨夜報表會夾到前一天、甚至前兩天的零星一兩張單（晚付款、改單）。
+     原本「同一天重匯就整批換掉」會把那天已經匯好的 75 張單換成那 1 張 ——
+     10/02 就是這樣被 10/04 的報表蓋成 75 元、1 杯的。
+     規則：這份檔案裡某一天的訂單數，不到庫裡那天已有訂單數的一半，就當夾帶，整天跳過
+     （明細、包材扣料、營收都不動）。反過來「尾巴先到、主體後到」不受影響：主體單數多，照樣換掉尾巴。*/
+  select coalesce(array_agg(dd), '{}') into skip
+    from (select (x->>'date')::date as dd,
+                 coalesce((x->>'orders')::int, 0) as inc,
+                 (select count(distinct s.order_no) from erp_pos_sales s
+                   where s.sales_on = (x->>'date')::date) as ex
+            from jsonb_array_elements(p_days) x) t
+   where ex > 0 and inc < ex * 0.5;
+  dates := array(select unnest(dates) except select unnest(skip));
+
+  /* 同一份檔案匯過就不重複匯明細。
+     但分類是後來加解析才拿得到的新資訊 —— 如果因為這樣就要把整批
+     資料刪掉重匯，代價太大也太危險。所以重複的檔案照樣補分類。*/
+  if v_existing is not null then
+    v_import := v_existing;
+  else
+    v_import := p_id;
+    insert into erp_pos_imports (id, source, file_name, file_hash,
+                                 date_from, date_to, order_count, revenue, imported_by)
+    values (p_id, p_source, p_file_name, p_file_hash, dfrom, dto, ords, tot, uid);
+  end if;
+
+ if v_existing is null then
+  -- 同一天重匯（補了漏單再匯一次）→ 該日整批換掉，不疊加
+  delete from erp_pos_sales where sales_on = any(dates);
+
+  insert into erp_pos_sales (import_id, sales_on, order_no, pos_name, qty, options)
+  select p_id, (r->>'date')::date, r->>'order_no', r->>'name',
+         coalesce((r->>'qty')::numeric, 1), coalesce(r->>'options', '')
+  from jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) r
+  where (r->>'date')::date = any(dates);
+
+  get diagnostics n = row_count;
+  update erp_pos_imports set row_count = n where id = v_import;
+
+  /* 包材自動扣料。
+     紙杯、封膜、袋子不需要配方 —— POS 的選項欄已經寫著答案：
+       cup   飲料杯數扣掉自帶環保杯的（客人自己帶杯就不該扣）
+       film  同紙杯（每杯都封膜；POS 那個「封膜」選項是特別註記用的，
+             1086 杯只出現 2 次，不是每次都記）
+       bag   賣出的兩杯袋／四杯袋
+     糖、鮮奶、鮮奶油要真的配方，不在這裡處理。
+
+     「哪些算飲料」跟報表用同一條推斷：有甜度或冰塊選項、或品名
+     含茶/烏龍。等品項分類做完會換成正式分類。 */
+  delete from erp_stock_moves
+   where kind = 'use' and note = 'POS自動扣料' and occurred_on = any(dates);
+
+  insert into erp_stock_moves (id, item_code, kind, qty_delta, occurred_on, note, created_by)
+  -- 別名不能叫 d：函式裡已經有一個 jsonb 變數叫 d（跑營收迴圈用的），
+  -- 撞名會讓 PostgreSQL 報 column reference "d" is ambiguous
+  select gen_random_uuid(), i.code, 'use', -u.q, u.sd, 'POS自動扣料', uid
+  from (
+    select sd, role, sum(q) as q from (
+      -- 紙杯和封膜：飲料杯數，扣掉自帶環保杯的
+      select sales_on as sd, r.role, qty as q
+        from erp_pos_sales, (values ('cup'),('film')) as r(role)
+       where sales_on = any(dates)
+         and (options ~ '甜|冰' or pos_name ~ '茶|烏龍')
+         and options not like '%環保杯%'
+      union all
+      -- 袋子：賣出幾個就用掉幾個
+      select sales_on, 'bag', qty
+        from erp_pos_sales
+       where sales_on = any(dates) and pos_name like '%杯袋%'
+    ) z group by sd, role
+  ) u
+  join erp_items i on i.pos_role = u.role and i.active
+  where u.q > 0;
+
+  /* 有對應到 ERP 品項的（杯套、T-Shirt 這類周邊）：賣一件扣一件。
+     飲料不該對應 —— 茶葉走煮茶登記扣、紙杯封膜走上面的 pos_role，
+     對應了會變成扣兩次。對應介面預設把飲料留空。*/
+  insert into erp_stock_moves (id, item_code, kind, qty_delta, occurred_on, note, created_by)
+  select gen_random_uuid(), m.item_code, 'use', -sum(s.qty), s.sales_on, 'POS自動扣料', uid
+  from erp_pos_sales s
+  join erp_pos_item_map m on m.pos_name = s.pos_name
+  where s.sales_on = any(dates)
+    and m.item_code is not null and not m.ignored
+  group by m.item_code, s.sales_on;
+ end if;   -- v_existing is null
+
+  -- 營運總表的品項分析：類別、單品營收
+  if p_cats is not null and jsonb_array_length(p_cats) > 0 then
+    delete from erp_pos_categories where sales_on = dto;
+    insert into erp_pos_categories (import_id, sales_on, category, pos_name, qty, amount)
+    select v_import, dto, c->>'category', c->>'name',
+           coalesce((c->>'qty')::numeric, 0), coalesce((c->>'amount')::numeric, 0)
+    from jsonb_array_elements(p_cats) c;
+
+    -- 分類自動帶進對應表，不用人工點 50 個品項
+    insert into erp_pos_item_map (pos_name, category, mapped_by, mapped_at)
+    select distinct c->>'name', c->>'category', uid, now()
+    from jsonb_array_elements(p_cats) c
+    on conflict (pos_name) do update set category = excluded.category, mapped_at = now();
+  end if;
+
+  -- 營收以 POS 為準，直接蓋掉手 key 的值
+  for d in select * from jsonb_array_elements(p_days) x
+             where v_existing is null and (x->>'date')::date = any(dates) loop
+    insert into erp_revenue (revenue_on, amount, note, updated_by, updated_at)
+    values ((d->>'date')::date, (d->>'revenue')::numeric, '微碧匯入', uid, now())
+    on conflict (revenue_on) do update set
+      amount = excluded.amount, note = excluded.note,
+      updated_by = excluded.updated_by, updated_at = now();
+  end loop;
+
+  return jsonb_build_object('ok', true,
+    'reason', case when v_existing is null then 'imported' else 'categories_only' end,
+    'rows', n, 'orders', ords, 'revenue', tot,
+    'date_from', dfrom, 'date_to', dto, 'days', coalesce(array_length(dates, 1), 0),
+    'skipped', to_jsonb(skip));
+end $$;
+
+-- 驗證（純 ASCII）：兩列都要 true
+-- select 'guard', prosrc like '%skip   date[]%' from pg_proc where proname='erp_pos_import'
+-- union all select 'zh', prosrc like '%'||chr(24494)||chr(30887)||chr(21295)||chr(20837)||'%' from pg_proc where proname='erp_pos_import';
