@@ -502,8 +502,8 @@ select.txt-input{appearance:none;-webkit-appearance:none}
 <!-- 煮茶紀錄查詢 -->
 <div class="modal-overlay hidden" id="modal-brewlog">
   <div class="modal-sheet">
-    <div class="modal-head"><span class="serif">煮茶紀錄</span><button onclick="closeModal('brewlog')">✕</button></div>
-    <div class="modal-note">煮茶一直寫得進去，但以前沒有一頁讀得出來。選期間查，可以匯出 CSV。</div>
+    <div class="modal-head"><span class="serif">煮茶・奶蓋紀錄</span><button onclick="closeModal('brewlog')">✕</button></div>
+    <div class="modal-note">一行一天。點日期看那天煮了哪幾桶、打了幾杯奶蓋。要明細就匯出 CSV。</div>
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
       <input type="date" id="bl-from" style="flex:1;min-width:120px">
       <span style="color:var(--grey)">～</span>
@@ -1100,7 +1100,7 @@ const submitBrew=confirmBrew;   // 底部按鈕先跳確認，確認了才走 fl
 /* 煮茶紀錄查詢＋匯出。
    煮茶寫進 erp_stock_moves(kind='brew') 之後，全站沒有一頁讀得出來 ——
    跟損耗修好之前一樣的毛病，記錯了要等月盤點才會冒出來。*/
-let brewLogRows=[];
+let brewLogRows=[], capLogRows=[];
 function openBrewLog(){
   const to=localDate();
   const d=new Date(); d.setDate(d.getDate()-29);
@@ -1114,7 +1114,11 @@ async function loadBrewLog(){
   box.innerHTML=`<div class="empty"><div class="t">讀取中…</div></div>`;
   $("#bl-sum").textContent="";
   try{
-    brewLogRows = await callRpc("erp_brew_list",{p_from:$("#bl-from").value, p_to:$("#bl-to").value}) || [];
+    const f=$("#bl-from").value, t=$("#bl-to").value;
+    brewLogRows = await callRpc("erp_brew_list",{p_from:f, p_to:t}) || [];
+    // 奶蓋也是「那天做了多少」，同一頁看（RPC 還沒部署就當沒有，不要整頁壞掉）
+    try{ capLogRows = await callRpc("erp_cap_range",{p_name:CAP_NAME, p_from:f, p_to:t}) || []; }
+    catch(e2){ capLogRows=[]; console.warn("奶蓋紀錄讀不到",e2); }
   }catch(e){
     box.innerHTML=`<div class="empty"><div class="ic">⚠</div><div class="t">${eh(e.message||"讀不到")}</div></div>`;
     return;
@@ -1123,14 +1127,19 @@ async function loadBrewLog(){
 }
 function renderBrewLog(){
   const box=$("#bl-body");
-  if(!brewLogRows.length){ box.innerHTML=`<div class="empty"><div class="t">這段期間沒有煮茶紀錄</div></div>`; return; }
+  if(!brewLogRows.length && !capLogRows.length){
+    box.innerHTML=`<div class="empty"><div class="t">這段期間沒有紀錄</div></div>`; return; }
   /* 老闆：「整頁太多字，只想看哪天煮了幾桶」。
      所以預設就是一行一天，點開才看那天煮了哪幾桶什麼茶。
      克數完全不顯示 —— 要對帳的話匯出 CSV，那裡兩欄都有。*/
   const byDay={};
   brewLogRows.forEach(r=>{ (byDay[r.day]=byDay[r.day]||[]).push(r); });
+  const capByDay={};
+  capLogRows.forEach(c=>{ capByDay[String(c.day).slice(0,10)]=c; });
+  Object.keys(capByDay).forEach(d=>{ byDay[d]=byDay[d]||[]; });   // 只打奶蓋沒煮茶的日子也要有一行
   box.innerHTML = Object.keys(byDay).sort().reverse().map(d=>{
     const rows=byDay[d];
+    const cap=capByDay[d];
     const wk=["日","一","二","三","四","五","六"][new Date(d).getDay()];
     const dayB=rows.reduce((a,r)=>a+(+r.buckets||0),0);
     const dayC=rows.reduce((a,r)=>a+(+r.cost||0),0);
@@ -1138,25 +1147,40 @@ function renderBrewLog(){
     const pots={};
     rows.forEach(r=>{ const k=r.blend_name||r.name; pots[k]=(pots[k]||0)+(+r.buckets||0); });
     const id="bl"+Math.random().toString(36).slice(2,8);
+    const capMade=cap?num1(cap.made):0, capDump=cap?num1(cap.dumped):0;
     return `<div class="bl-day" onclick="document.getElementById('${id}').classList.toggle('hidden')">`
          + `<span><i class="bl-caret">▸</i>${d.slice(5)}　${wk}</span>`
-         + `<b>${num1(dayB)} 桶${dayC?`<small> · ${money(dayC)}</small>`:""}</b></div>`
+         + `<b>${dayB?`${num1(dayB)} 桶`:""}`
+         + `${capMade?`${dayB?"　":""}奶蓋 ${capMade} 杯`:""}`
+         + `${dayC?`<small> · ${money(dayC)}</small>`:""}</b></div>`
          + `<div id="${id}" class="hidden">`
          + Object.keys(pots).filter(k=>pots[k]>0)
              .map(k=>`<div class="bl-part"><span>${k}</span><b>${num1(pots[k])} 桶</b></div>`).join("")
+         + (capMade||capDump
+             ? `<div class="bl-part"><span>${CAP_NAME}${capDump?`（倒掉 ${capDump} 杯）`:""}</span>`
+               + `<b>${capMade} 杯</b></div>` : "")
          + `</div>`;
   }).join("");
   const tb=brewLogRows.reduce((a,r)=>a+(+r.buckets||0),0);
   const days=Object.keys(byDay).length;
-  $("#bl-sum").textContent=`${days} 天 · 共 ${num1(tb)} 桶 · 點日期看煮了什麼`;
+  const cm=capLogRows.reduce((a,c)=>a+(+c.made||0),0);
+  const cd=capLogRows.reduce((a,c)=>a+(+c.dumped||0),0);
+  $("#bl-sum").textContent=`${days} 天 · 共 ${num1(tb)} 桶`
+    + (cm?` · 奶蓋 ${num1(cm)} 杯${cd?`（倒 ${num1(cd)}）`:""}`:"")
+    + ` · 點日期看明細`;
 }
 const num1=n=>Math.round((+n||0)*10)/10;
 function exportBrewLog(){
-  if(!brewLogRows.length){ toast("沒有資料可以匯出"); return; }
+  if(!brewLogRows.length && !capLogRows.length){ toast("沒有資料可以匯出"); return; }
   const head=["日期","茶桶","原料","桶數","用量","單位","成本","記錄人"];
+  const capLines=capLogRows.map(c=>[String(c.day).slice(0,10), CAP_NAME, "", "", c.made, "杯", "", ""])
+    .concat(capLogRows.filter(c=>+c.dumped>0)
+      .map(c=>[String(c.day).slice(0,10), CAP_NAME+"（倒掉）", "", "", c.dumped, "杯", "", ""]));
   const esc=v=>`"${String(v==null?"":v).replace(/"/g,'""')}"`;
-  const lines=[head.map(esc).join(",")].concat(brewLogRows.map(r=>
-    [r.day, r.blend_name||"", r.name, r.buckets??"", r.qty, r.unit, r.cost??"", r.who].map(esc).join(",")));
+  const lines=[head.map(esc).join(",")]
+    .concat(brewLogRows.map(r=>
+      [r.day, r.blend_name||"", r.name, r.buckets??"", r.qty, r.unit, r.cost??"", r.who].map(esc).join(",")))
+    .concat(capLines.map(a=>a.map(esc).join(",")));
   // BOM 讓 Excel 開中文不亂碼
   const blob=new Blob(["\ufeff"+lines.join("\n")],{type:"text/csv;charset=utf-8"});
   const a=document.createElement("a");
