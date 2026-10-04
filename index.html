@@ -212,6 +212,19 @@ body{
 .pl-x small{display:block;font-size:10px}
 .pl-x b{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
 .pl-x i{font-style:normal;font-size:11.5px}
+.ms-row{display:grid;grid-template-columns:1fr .9fr .55fr 1fr;gap:6px;align-items:baseline;
+  padding:10px 14px;border-bottom:1px solid var(--line);font-size:13.5px;
+  font-variant-numeric:tabular-nums;cursor:pointer}
+.ms-row:last-child{border-bottom:none}
+.ms-row span:not(.m){text-align:right}
+.ms-row .m{text-align:left;font-weight:600;cursor:inherit}
+.ms-row .m small,.ms-row span small{display:block;font-size:10px;color:var(--grey);font-weight:400}
+.ms-row .m i{font-style:normal;font-size:9.5px;color:var(--grey);margin-left:5px;font-weight:400}
+.ms-row.ms-hd{font-size:11px;color:var(--grey);letter-spacing:.08em;cursor:default;
+  background:var(--news);font-weight:400}
+.ms-row.ms-hd .m{font-weight:400}
+.ms-row.now{background:var(--news)}
+.ms-row .neg{color:var(--alert)}
 .exp-item{display:flex;justify-content:space-between;align-items:center;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--paper)}
 .exp-item:last-child{border-bottom:none}
 .exp-item .l .n{font-size:14px;font-weight:600}
@@ -606,6 +619,8 @@ select.txt-input{appearance:none;-webkit-appearance:none}
     <div class="pl-note" id="pl-warn" style="display:none"></div>
     <div id="pl-extra"></div>
   </div>
+  <div class="sec-eyebrow">各月損益</div>
+  <div class="card" id="ms-body" style="margin-bottom:14px"></div>
   <div style="display:flex;gap:8px;margin-bottom:14px">
     <button class="mini-btn" style="flex:1" onclick="exportCSV()">匯出 CSV</button>
     <button class="mini-btn" style="flex:1;border-color:var(--ink);color:var(--ink)" onclick="openPosImport()">⬆ 匯入微碧報表</button>
@@ -2237,6 +2252,41 @@ function prevMonth(m){ const y=+m.slice(0,4), mo=+m.slice(5,7); const d=new Date
   return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); }
 /* 真正的物料成本要從庫存異動算（耗用量 × 成本），後端 erp_month_report 有。
    前端自己用「廠商貨款」加總是錯的：那是現金流，而且月結會差一個月。 */
+/* 各月損益。報表頁本來只能用 ◀▶ 一個月一個月翻，看不出趨勢。
+   算式跟上面的損益表同一套（毛利＝營收−物料成本、淨利再減營業費用），
+   不要兩邊各算各的。*/
+let monthSeries=null;
+async function loadMonthSeries(){
+  if(!dataReady||!isManager())return;
+  const box=$("#ms-body"); if(!box) return;
+  if(monthSeries){ renderMonthSeries(); return; }
+  box.innerHTML=`<div class="empty"><div class="t">讀取中…</div></div>`;
+  try{ monthSeries = await callRpc("erp_month_series",{p_months:12}) || []; }
+  catch(e){ console.warn("各月損益讀取失敗",e); box.innerHTML=`<div class="empty"><div class="t">讀不到，等一下再回這頁</div></div>`; return; }
+  renderMonthSeries();
+}
+function renderMonthSeries(){
+  const box=$("#ms-body"); if(!box||!monthSeries) return;
+  const rows=monthSeries.filter(r=>(+r.revenue||0)>0 || (+r.opex||0)>0);
+  if(!rows.length){ box.innerHTML=`<div class="empty"><div class="t">還沒有資料</div></div>`; return; }
+  box.innerHTML=
+    `<div class="ms-row ms-hd"><span class="m">月份</span><span>營收</span><span>毛利率</span><span>本期損益</span></div>`
+    + rows.map(r=>{
+        const rev=+r.revenue||0, cogs=+r.cogs||0, opex=+r.opex||0;
+        const gross=rev-cogs, profit=gross-opex;
+        const gp=rev?Math.round(gross/rev*1000)/10:null;
+        const np=rev?Math.round(profit/rev*1000)/10:null;
+        const cur=r.month===curMonth();
+        return `<div class="ms-row${cur?" now":""}" onclick="jumpMonth('${r.month}')">`
+          + `<span class="m">${r.month.slice(5)} 月${cur?"<i>本月</i>":""}<small>${r.days} 天</small></span>`
+          + `<span>${money(rev)}</span>`
+          + `<span>${gp===null?"—":gp+"%"}</span>`
+          + `<span class="${profit<0?"neg":""}">${money(profit)}${np===null?"":`<small>${np}%</small>`}</span></div>`;
+      }).join("");
+}
+function jumpMonth(m){ viewMonth=m; renderReport(); renderRevenue(); loadMonthReport();
+  window.scrollTo({top:0,behavior:"smooth"}); }
+
 async function loadMonthReport(){
   if(!dataReady||!isManager())return;
   try{
@@ -2329,16 +2379,8 @@ function renderReport(){
       + `<br>想看生意好不好，看上面的<b>日均</b>比較準。`;
   }
 
-  /* 上個月同期、付給廠商 —— 補充資訊，不放進損益表本身 */
-  const pm=prevMonth(m);
-  const pmDays=dailyRevenue.filter(r=>r.date.startsWith(pm)).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,days);
-  const pmRev=pmDays.reduce((s,r)=>s+r.amt,0);
+  /* 付給廠商 —— 補充資訊，不放進損益表本身（老闆：不用比較上個月） */
   let extra="";
-  if(days>0 && pmDays.length){
-    const d=pmRev?Math.round((mRev-pmRev)/pmRev*100):0;
-    extra += `<div class="pl-x"><span>上個月同期（前 ${pmDays.length} 天）</span>`
-           + `<b>${money(pmRev)} <i style="color:${d>=0?'var(--ok)':'var(--alert)'}">${d>0?"+":""}${d}%</i></b></div>`;
-  }
   if(paid) extra += `<div class="pl-x"><span>本月付給廠商<small>現金流，不是成本，不在上表內</small></span><b>${money(paid)}</b></div>`;
   const xb=$("#pl-extra"); if(xb) xb.innerHTML=extra;
 
@@ -3995,7 +4037,7 @@ function nav(scr){
   $("#submit-log").classList.toggle("hidden",scr!=="log");
   $("#submit-expense").classList.toggle("hidden",scr!=="expense");
   $("#submit-stocktake").classList.toggle("hidden",scr!=="stocktake");
-  if(scr==="report"){renderReport();renderRevenue();loadMonthReport();}
+  if(scr==="report"){renderReport();renderRevenue();loadMonthReport();loadMonthSeries();}
   if(scr==="analysis")loadAnalytics();
   if(scr==="expense")renderPay();
   if(scr==="recon")renderRecon();
