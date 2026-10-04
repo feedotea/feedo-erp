@@ -187,6 +187,8 @@ body{
 .cat-hint{margin-top:8px;padding:9px 11px;background:var(--news);border-left:3px solid var(--warn);
   font-size:12.5px;line-height:1.6;color:var(--ink)}
 .cat-hint b{font-weight:700}
+.cat-hint.ok{border-left-color:var(--ok);color:var(--grey)}
+.cat-hint.warn{border-left-color:var(--warn)}
 .exp-item{display:flex;justify-content:space-between;align-items:center;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--paper)}
 .exp-item:last-child{border-bottom:none}
 .exp-item .l .n{font-size:14px;font-weight:600}
@@ -556,7 +558,7 @@ select.txt-input{appearance:none;-webkit-appearance:none}
     <div class="field"><label>類別</label><div class="chips" id="exp-cats"></div>
       <div id="exp-cat-hint" class="cat-hint" style="display:none"></div></div>
     <div class="field"><label>金額</label><input class="num-input" id="exp-amt" type="number" inputmode="decimal" placeholder="0"></div>
-    <div class="field"><label>付給誰</label><input class="txt-input" id="exp-payee" placeholder="例：房東 / 松霖 / 台電"></div>
+    <div class="field"><label>付給誰</label><input class="txt-input" id="exp-payee" placeholder="例：房東 / 松霖 / 台電" oninput="renderExpHint()"></div>
     <div class="field"><label>付款方式</label>
       <div class="seg" id="exp-method"><button class="on" data-m="轉帳">轉帳</button><button data-m="現金">現金</button><button data-m="刷卡">刷卡</button></div></div>
     <div class="field"><label>備註（可空）</label><input class="txt-input" id="exp-note" placeholder="例：6月份"></div>
@@ -2124,17 +2126,40 @@ function renderExpCats(){
   const box=$("#exp-cats");box.innerHTML="";
   EXP_CATS.forEach(c=>{const e=document.createElement("div");e.className="chip"+(expState.cat===c?" on":"");e.textContent=c;
     e.onclick=()=>{expState.cat=c;renderExpCats();};box.appendChild(e);});
-  /* 「廠商貨款」被故意排除在營業開銷之外（它是現金流，真正的成本從庫存算）。
-     但沒有建品項的東西 —— 冰塊就是 —— 不會有庫存異動，所以物料成本也抓不到，
-     記成廠商貨款的話那筆錢在利潤表上會完全消失。提醒一下，不要靠人記得。*/
-  const hint=$("#exp-cat-hint");
-  if(hint){
-    const on = expState.cat==="廠商貨款";
-    hint.style.display = on ? "block" : "none";
-    if(on) hint.innerHTML =
-      "這筆<b>不會算進「本月利潤」</b>。廠商貨款是現金流，真正的成本是用掉料的時候"
-      + "從庫存算的。<br><b>沒有建品項的東西</b>（例如冰塊）請改選「<b>雜支</b>」，不然這筆錢會憑空不見。";
-  }
+  renderExpHint();
+}
+
+/* 防呆：用「付給誰」比對品項上的供應商，兩個方向都擋。
+   記錯的代價是相反的兩種錯，而且都要翻帳才看得出來：
+     冰塊記成廠商貨款 → 物料成本抓不到（沒品項）＋ 營業開銷排除它 → 錢憑空不見，利潤虛高
+     茶葉記成雜支     → 物料成本已經算過一次，雜支再算一次 → 重複計算，利潤虛低 */
+function knownSuppliers(){
+  return [...new Set(items.map(i=>i.supplier).filter(x=>x&&x!=="—"))];
+}
+function matchSupplier(payee){
+  const p=(payee||"").trim(); if(!p) return null;
+  return knownSuppliers().find(sup => sup===p || sup.includes(p) || p.includes(sup)) || null;
+}
+function expHintState(){
+  const cat=expState.cat;
+  const raw=(($("#exp-payee")||{}).value||"").trim();
+  const sup=matchSupplier(raw);
+  if(cat==="廠商貨款" && !sup)
+    return {lv:"warn", msg:"查不到「"+eh(raw||"這家廠商")+"」有對應的品項。"
+      +"<b>廠商貨款不會算進「本月利潤」</b>——它是現金流，成本是用掉料的時候從庫存算的。"
+      +"<br>沒建品項的東西（例如<b>冰塊</b>）請改選「<b>雜支</b>」，不然這筆錢會憑空不見。"};
+  if(cat==="廠商貨款" && sup)
+    return {lv:"ok", msg:"「"+eh(sup)+"」有對應的品項 ✓ 這筆算現金流，成本會在用掉料的時候從庫存算。"};
+  if(cat && cat!=="廠商貨款" && sup)
+    return {lv:"warn", msg:"「"+eh(sup)+"」是<b>有建品項的廠商</b>，這筆看起來是進貨。"
+      +"<br>記成「"+eh(cat)+"」的話，<b>庫存那邊會再算一次成本，等於算了兩遍</b>。確定不是「<b>廠商貨款</b>」嗎？"};
+  return null;
+}
+function renderExpHint(){
+  const hint=$("#exp-cat-hint"); if(!hint) return;
+  const st=expHintState();
+  hint.style.display = st ? "block" : "none";
+  if(st){ hint.className="cat-hint "+st.lv; hint.innerHTML=st.msg; }
 }
 $("#exp-method").addEventListener("click",e=>{if(e.target.dataset.m){expState.method=e.target.dataset.m;
   [...$("#exp-method").children].forEach(b=>b.classList.toggle("on",b.dataset.m===expState.method));}});
@@ -2143,11 +2168,17 @@ async function submitExpense(){
   const amt=parseFloat($("#exp-amt").value);const payee=$("#exp-payee").value.trim();
   if(!expState.cat){toast("先選類別");return;}if(!amt||amt<=0){toast("填金額");return;}
   const cat=expState.cat,method=expState.method,note=$("#exp-note").value.trim();
+  // 提示看得到不代表看得懂，真的要存之前再問一次（只問有疑慮的那兩種）
+  const st=expHintState();
+  if(st && st.lv==="warn"){
+    const plain=st.msg.replace(/<br>/g,"\n").replace(/<[^>]+>/g,"");
+    if(!confirm(plain+"\n\n還是要用「"+cat+"」記這筆嗎？")) return;
+  }
   const id=uuid(),date=localDate();
   expenses.push({id,date,cat,amt,payee:payee||"—",method,note,paid:true});
   const sent=await push("erp_add_expense",{
     p_id:id,p_cat:cat,p_amount:amt,p_payee:payee||"—",p_method:method,p_note:note,p_date:date});
-  $("#exp-amt").value="";$("#exp-payee").value="";$("#exp-note").value="";expState.cat=null;renderExpCats();
+  $("#exp-amt").value="";$("#exp-payee").value="";$("#exp-note").value="";expState.cat=null;renderExpCats();renderExpHint();
   renderReport();toast(`已記 ${method} · ${money(amt)}`+(sent?"":"　⚠ 待同步"));
 }
 
