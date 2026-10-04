@@ -1124,7 +1124,10 @@ async function loadBrewLog(){
 function renderBrewLog(){
   const box=$("#bl-body");
   if(!brewLogRows.length){ box.innerHTML=`<div class="empty"><div class="t">這段期間沒有煮茶紀錄</div></div>`; return; }
-  // 一天一組，看得出那天總共煮幾桶
+  /* 一天一組，組裡再按茶桶分。
+     桶數是主角、克數是細節 —— 店裡講的是「煮幾桶」，不是「幾克」。
+     拼茶尤其需要：兩列各 200g 其實是同一次煮的 4 桶（一桶 100g ＝ 迎香 50 ＋ 金萱 50），
+     而且 buckets 只記在其中一列，單看那一列會以為沒記到。*/
   const byDay={};
   brewLogRows.forEach(r=>{ (byDay[r.day]=byDay[r.day]||[]).push(r); });
   box.innerHTML = Object.keys(byDay).sort().reverse().map(d=>{
@@ -1132,11 +1135,25 @@ function renderBrewLog(){
     const buckets=rows.reduce((a,r)=>a+(+r.buckets||0),0);
     const cost=rows.reduce((a,r)=>a+(+r.cost||0),0);
     const wk=["日","一","二","三","四","五","六"][new Date(d).getDay()];
+    // 拼茶用茶桶當組名，單品茶用自己的名字
+    const byPot={};
+    rows.forEach(r=>{ const k=r.blend_name||r.name; (byPot[k]=byPot[k]||[]).push(r); });
+    const pots=Object.keys(byPot).map(k=>{
+      const rs=byPot[k];
+      const b=rs.reduce((a,r)=>a+(+r.buckets||0),0);
+      const c=rs.reduce((a,r)=>a+(+r.cost||0),0);
+      const isBlend=rs.some(r=>r.blend_name);
+      let html=`<div class="bc-row bl-pot"><span>${k}</span>`
+             + `<b>${Math.round(b*10)/10} 桶${c?`<small> · ${money(c)}</small>`:""}</b></div>`;
+      // 單品茶一桶就一樣東西，再列一次等於重複
+      if(isBlend||rs.length>1){
+        html += rs.map(r=>`<div class="bc-row bl-part">`
+             + `<span>${r.name}</span><b>${(+r.qty).toLocaleString()} ${r.unit}</b></div>`).join("");
+      }
+      return html;
+    }).join("");
     return `<div class="bc-row bc-total"><span>${d.slice(5)}（${wk}）</span>`
-         + `<b>${Math.round(buckets*10)/10} 桶${cost?` · ${money(cost)}`:""}</b></div>`
-         + rows.map(r=>`<div class="bc-row" style="font-size:13.5px;color:var(--grey)">`
-             + `<span>${r.blend_name?`${r.blend_name} → `:""}${r.name}</span>`
-             + `<b>${(+r.qty).toLocaleString()} ${r.unit}</b></div>`).join("");
+         + `<b>${Math.round(buckets*10)/10} 桶${cost?` · ${money(cost)}`:""}</b></div>` + pots;
   }).join("");
   const tb=brewLogRows.reduce((a,r)=>a+(+r.buckets||0),0);
   const tc=brewLogRows.reduce((a,r)=>a+(+r.cost||0),0);
@@ -1320,6 +1337,10 @@ function generateBrewPDF(){
   padding:9px 0;border-bottom:1px solid var(--line);font-size:15px}
 .bc-row b{font-variant-numeric:tabular-nums}
 .bc-row.bc-total{border-bottom:none;border-top:2px solid var(--ink);margin-top:4px;font-weight:600}
+.bl-pot{font-size:14.5px;padding-left:10px;border-bottom:none}
+.bl-pot b small{font-weight:400;color:var(--grey)}
+.bl-part{font-size:13px;color:var(--grey);padding:3px 0 3px 28px;border-bottom:none}
+.bl-part+.bl-pot{border-top:1px solid var(--line);margin-top:4px;padding-top:9px}
 
 @media print{.noprint{display:none}}
     button{margin-top:20px;padding:12px 24px;background:#1A1A1A;color:#fff;border:none;border-radius:3px;font-size:14px;cursor:pointer}
