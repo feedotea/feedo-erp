@@ -1124,10 +1124,9 @@ async function loadBrewLog(){
 function renderBrewLog(){
   const box=$("#bl-body");
   if(!brewLogRows.length){ box.innerHTML=`<div class="empty"><div class="t">這段期間沒有煮茶紀錄</div></div>`; return; }
-  /* 預設只看「哪天煮了幾桶什麼茶」—— 店裡講的就是這個。
-     克數是對帳才要的，收在展開裡，CSV 照舊兩欄都有。
-     同一支茶一天常常分好幾次登記，所以每一層都要合併，不然會看到
-     「機採紅茶 300g／機採紅茶 150g」兩行一樣的名字。*/
+  /* 老闆：「整頁太多字，只想看哪天煮了幾桶」。
+     所以預設就是一行一天，點開才看那天煮了哪幾桶什麼茶。
+     克數完全不顯示 —— 要對帳的話匯出 CSV，那裡兩欄都有。*/
   const byDay={};
   brewLogRows.forEach(r=>{ (byDay[r.day]=byDay[r.day]||[]).push(r); });
   box.innerHTML = Object.keys(byDay).sort().reverse().map(d=>{
@@ -1135,37 +1134,21 @@ function renderBrewLog(){
     const wk=["日","一","二","三","四","五","六"][new Date(d).getDay()];
     const dayB=rows.reduce((a,r)=>a+(+r.buckets||0),0);
     const dayC=rows.reduce((a,r)=>a+(+r.cost||0),0);
-
+    // 點開才看的：那天各煮了幾桶什麼茶（拼茶用茶桶的名字，原料合併）
     const pots={};
-    rows.forEach(r=>{
-      const k=r.blend_name||r.name;
-      const p=pots[k]=pots[k]||{b:0,c:0,parts:{}};
-      p.b+=(+r.buckets||0); p.c+=(+r.cost||0);
-      const q=p.parts[r.name]=p.parts[r.name]||{qty:0,unit:r.unit};
-      q.qty+=(+r.qty||0);                        // 同一支原料合併
-    });
-
-    return `<div class="bc-row bc-total"><span>${d.slice(5)}（${wk}）</span>`
+    rows.forEach(r=>{ const k=r.blend_name||r.name; pots[k]=(pots[k]||0)+(+r.buckets||0); });
+    const id="bl"+Math.random().toString(36).slice(2,8);
+    return `<div class="bl-day" onclick="document.getElementById('${id}').classList.toggle('hidden')">`
+         + `<span><i class="bl-caret">▸</i>${d.slice(5)}　${wk}</span>`
          + `<b>${num1(dayB)} 桶${dayC?`<small> · ${money(dayC)}</small>`:""}</b></div>`
-         + Object.keys(pots).map(k=>{
-             const p=pots[k];
-             const names=Object.keys(p.parts);
-             // 單品茶一桶就一樣東西，沒有展開的必要
-             const detail = names.length>1 || names[0]!==k;
-             const id="bl"+Math.random().toString(36).slice(2,8);
-             return `<div class="bc-row bl-pot${detail?' bl-can':''}"`
-                  + `${detail?` onclick="document.getElementById('${id}').classList.toggle('hidden')"`:''}>`
-                  + `<span>${detail?'<i class="bl-caret">▸</i>':''}${k}</span>`
-                  + `<b>${num1(p.b)} 桶${p.c?`<small> · ${money(p.c)}</small>`:""}</b></div>`
-                  + (detail?`<div id="${id}" class="hidden">`
-                      + names.map(n=>`<div class="bc-row bl-part"><span>${n}</span>`
-                          + `<b>${Math.round(p.parts[n].qty*10)/10} ${p.parts[n].unit}</b></div>`).join("")
-                      + `</div>`:"");
-           }).join("");
+         + `<div id="${id}" class="hidden">`
+         + Object.keys(pots).filter(k=>pots[k]>0)
+             .map(k=>`<div class="bl-part"><span>${k}</span><b>${num1(pots[k])} 桶</b></div>`).join("")
+         + `</div>`;
   }).join("");
   const tb=brewLogRows.reduce((a,r)=>a+(+r.buckets||0),0);
-  const tc=brewLogRows.reduce((a,r)=>a+(+r.cost||0),0);
-  $("#bl-sum").textContent=`共 ${num1(tb)} 桶`+(tc?` · 茶葉成本 ${money(tc)}`:"")+" · 點茶名看原料";
+  const days=Object.keys(byDay).length;
+  $("#bl-sum").textContent=`${days} 天 · 共 ${num1(tb)} 桶 · 點日期看煮了什麼`;
 }
 const num1=n=>Math.round((+n||0)*10)/10;
 function exportBrewLog(){
@@ -1346,10 +1329,13 @@ function generateBrewPDF(){
   padding:9px 0;border-bottom:1px solid var(--line);font-size:15px}
 .bc-row b{font-variant-numeric:tabular-nums}
 .bc-row.bc-total{border-bottom:none;border-top:2px solid var(--ink);margin-top:4px;font-weight:600}
-.bl-pot{font-size:14.5px;padding-left:10px;border-bottom:none}
-.bl-pot b small{font-weight:400;color:var(--grey)}
-.bl-part{font-size:13px;color:var(--grey);padding:3px 0 3px 30px;border-bottom:none}
-.bl-can{cursor:pointer}
+.bl-day{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+  padding:13px 2px;border-bottom:1px solid var(--line);font-size:16px;cursor:pointer}
+.bl-day b{font-variant-numeric:tabular-nums;font-weight:600}
+.bl-day b small{font-weight:400;color:var(--grey);font-size:12.5px}
+.bl-part{display:flex;justify-content:space-between;gap:12px;font-size:13.5px;color:var(--grey);
+  padding:4px 2px 4px 24px;border-bottom:1px solid var(--line)}
+.bl-part b{font-weight:500;font-variant-numeric:tabular-nums}
 .bl-caret{font-style:normal;color:var(--grey);font-size:11px;margin-right:5px;display:inline-block}
 
 @media print{.noprint{display:none}}
