@@ -537,8 +537,10 @@ select.txt-input{appearance:none;-webkit-appearance:none}
 <div class="modal-overlay hidden" id="modal-waste">
   <div class="modal-sheet">
     <div class="modal-head"><span class="serif">記損耗 / 報廢</span><button onclick="closeModal('waste')">✕</button></div>
-    <div class="modal-note">煮壞、過期、試喝倒掉的記這裡，不算進「用量」，才不會讓預測失真。</div>
+    <div class="modal-note">煮壞、過期、試喝的記這裡，不算進「用量」（預測才不會失真），但會算進當月物料成本。</div>
     <div class="field"><label>品項</label><div class="chips pick" id="waste-items"></div></div>
+    <!-- 試喝整杯：選哪一支飲料，整杯配方扣掉（茶葉不扣，煮桶時已扣） -->
+    <div class="field hidden" id="waste-drinks-box"><label>試喝哪一支</label><div class="chips pick" id="waste-drinks"></div></div>
     <div class="field"><label>單位</label><div class="chips" id="waste-units"></div></div>
     <div style="display:flex;gap:10px">
       <div class="field" style="flex:1"><label>數量 <span id="waste-unit" style="color:var(--ink)"></span></label>
@@ -3122,12 +3124,23 @@ const CAP_UNITS=["杯","鍋"];
    所以奶蓋改走 erp_cap_recipe —— 只回用量不回錢，店長店員都拿得到。*/
 let capRows=null;
 function capRecipe(){ const r=recRows(CAP_NAME); return r.length?r:(capRows||[]); }
+/* 試喝整杯：店裡給客人試喝的通常是整杯 500cc，一杯材料 17～27 元，要記。
+   做法跟奶蓋一樣按配方拆回去扣，差別是：
+   - 茶葉不扣（deduct=false，煮桶時已經扣過）
+   - 糖按店裡預設甜度縮（配方存的是全糖量）
+   - 紙杯多扣一個（平常是 POS 匯入才扣，試喝沒經過 POS）
+   飲料名單走 erp_recipe_names、配方走 erp_cap_recipe，店員都拿得到。*/
+const TASTE_SWEET=0.7;              // 預設 7 分甜
+let drinkNames=null, tasteRecipes={};
 function openWaste(){
   wasteState={code:null,reason:null,unit:null,combo:null};
   const box=$("#waste-items");box.innerHTML="";
   // 配方只有開「飲料配方」時才載，奶蓋那顆要靠它，所以在背景補載一次
   if(!capRecipe().length) callRpc("erp_cap_recipe",{p_name:CAP_NAME}).then(d=>{capRows=d||[];
     if(!$("#modal-waste").classList.contains("hidden")) addComboChip();}).catch(()=>{});
+  $("#waste-drinks-box").classList.add("hidden");
+  if(!drinkNames) callRpc("erp_recipe_names").then(d=>{drinkNames=(d||[]).filter(n=>n!==CAP_NAME);
+    if(!$("#modal-waste").classList.contains("hidden")) addTasteChip();}).catch(()=>{});
   // 會倒掉的幾乎都是食材；周邊（T-shirt、帽子、杯套）和包材排到最後。
   // 茶桶（拼茶）排掉 —— 它沒有實體庫存，要倒的是裡面的茶葉，跟叫貨和盤點同一個判斷
   const back=["周邊","包材"];
@@ -3136,10 +3149,12 @@ function openWaste(){
   sorted.forEach(i=>{const c=document.createElement("div");c.className="chip";c.textContent=i.name;
     c.onclick=()=>{wasteState.code=i.code;wasteState.combo=null;wasteState.unit=i.unit;
       [...box.children].forEach(x=>x.classList.remove("on"));c.classList.add("on");
+      $("#waste-drinks-box").classList.add("hidden");
       wasteErr("");
       renderWasteUnits(i);          // 單位只留換得過去的，選不到死路
     };box.appendChild(c);});
   addComboChip();
+  addTasteChip();
   renderWasteUnits(null);
   const rb=$("#waste-reasons");rb.innerHTML="";
   WASTE_REASONS.forEach(r=>{const c=document.createElement("div");c.className="chip";c.textContent=r;
@@ -3164,6 +3179,7 @@ function toItemUnit(qty,fromUnit,it){
 async function submitWaste(){
   if(!canWrite())return;
   const q=parseFloat($("#waste-qty").value);
+  if(wasteState.combo==="taste") return submitTasteWaste(q);
   if(wasteState.combo) return submitComboWaste(q);
   if(!wasteState.code){wasteErr("先選一個品項");toast("先選品項");return;}
   if(!q||q<=0){wasteErr("數量要填大於 0 的數字");toast("填數量");return;}
@@ -3246,6 +3262,62 @@ function wasteErr(msg){
 function unitLabel(u,it){
   return (u==="ml" && it && it.brewMlPerG>0) ? "(ml 茶湯)" : "("+u+")";
 }
+function addTasteChip(){
+  const box=$("#waste-items"); if(!box) return;
+  if(box.querySelector(".chip.taste")) return;
+  if(!drinkNames||!drinkNames.length) return;        // 還沒載到名單就先不給這顆
+  const c=document.createElement("div");
+  c.className="chip taste"; c.textContent="試喝整杯";
+  c.style.cssText="border-color:var(--ink);font-weight:600";
+  c.onclick=()=>{
+    wasteState={code:null, combo:"taste", unit:"杯", reason:"試喝", taste:wasteState.taste||null};
+    [...box.children].forEach(x=>x.classList.remove("on")); c.classList.add("on");
+    // 飲料名單
+    const db=$("#waste-drinks"); db.innerHTML="";
+    drinkNames.forEach(n=>{const b=document.createElement("div");b.className="chip"+(n===wasteState.taste?" on":"");
+      b.textContent=n;
+      b.onclick=()=>{wasteState.taste=n;[...db.children].forEach(x=>x.classList.remove("on"));b.classList.add("on");wasteErr("");
+        if(!tasteRecipes[n]) callRpc("erp_cap_recipe",{p_name:n}).then(d=>{tasteRecipes[n]=d||[];}).catch(()=>{});};
+      db.appendChild(b);});
+    $("#waste-drinks-box").classList.remove("hidden");
+    // 單位只有杯
+    const ub=$("#waste-units"); ub.innerHTML="";
+    const u=document.createElement("div");u.className="chip on";u.textContent="杯";ub.appendChild(u);
+    $("#waste-unit").textContent="(杯)";
+    if(!$("#waste-qty").value) $("#waste-qty").value="1";
+    // 原因預選「試喝」，還是可以改成招待
+    [...$("#waste-reasons").children].forEach(x=>x.classList.toggle("on",x.textContent==="試喝"));
+    wasteErr("");
+  };
+  const cap=box.querySelector(".chip.combo");
+  box.insertBefore(c, cap?cap.nextSibling:box.firstChild);
+}
+/* 試喝整杯：整杯配方扣掉。茶葉（deduct=false）不扣，糖按預設甜度縮，紙杯另扣一個。*/
+async function submitTasteWaste(q){
+  if(!q||q<=0){wasteErr("幾杯？填大於 0 的數字");toast("填杯數");return;}
+  const name=wasteState.taste;
+  if(!name){wasteErr("先選試喝的是哪一支");toast("選飲料");return;}
+  if(!wasteState.reason){wasteErr("還沒選原因");toast("選原因");return;}
+  let rows=tasteRecipes[name];
+  if(!rows){ try{ rows=tasteRecipes[name]=(await callRpc("erp_cap_recipe",{p_name:name}))||[]; }catch(e){ rows=[]; } }
+  rows=rows.filter(r=>r.deduct!==false);
+  if(!rows.length){wasteErr(`${name} 還沒有配方，先請店長在「飲料配方」裡建`);toast("沒有配方");return;}
+  const d=$("#waste-date").value||localDate();
+  const note=`${wasteState.reason} ${name}（${q} 杯）`;
+  const moves=rows.map(r=>({code:r.item_code, qty:Math.round(r.qty*q*(r.scale_by_sweet?TASTE_SWEET:1)*1000)/1000}));
+  const cup=items.find(i=>i.posRole==="cup"); if(cup) moves.push({code:cup.code, qty:q});
+  let sent=true;
+  for(const m of moves){
+    const it=items.find(i=>i.code===m.code); if(!it||m.qty<=0) continue;
+    it.bal=Math.max(0,it.bal-m.qty);
+    const ok=await push("erp_log_move",{p_id:uuid(),p_code:it.code,p_kind:"waste",p_qty:m.qty,p_note:note,p_date:d});
+    if(!ok) sent=false;
+  }
+  closeModal('waste');renderInv();renderOrder();renderBrew();refreshSummary();loadWaste();
+  const back=d!==localDate()?`${d.slice(5)} `:"";
+  toast(`${back}${wasteState.reason} ${name} ${q} 杯`+(sent?"":"　⚠ 待同步"));
+  if(sent)resyncIfClean();
+}
 function renderWasteUnits(it){
   const ub=$("#waste-units"); if(!ub) return;
   ub.innerHTML="";
@@ -3275,6 +3347,7 @@ function addComboChip(){
   c.onclick=()=>{
     wasteState={code:null, combo:CAP_NAME, unit:"杯", reason:wasteState.reason};
     [...box.children].forEach(x=>x.classList.remove("on")); c.classList.add("on");
+    $("#waste-drinks-box").classList.add("hidden");
     const ub=$("#waste-units"); ub.innerHTML="";
     CAP_UNITS.forEach(u=>{const b=document.createElement("div");b.className="chip"+(u==="杯"?" on":"");
       b.textContent=u;
