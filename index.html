@@ -1165,17 +1165,21 @@ function renderBrewLog(){
     rows.forEach(r=>{ const k=r.blend_name||r.name; pots[k]=(pots[k]||0)+(+r.buckets||0); });
     const id="bl"+Math.random().toString(36).slice(2,8);
     const capMade=cap?num1(cap.made):0, capDump=cap?num1(cap.dumped):0;
+    // 還沒開始登記打了幾杯，但已經有人記倒掉 —— 這時候不要顯示「0 杯」，只講倒掉
+    const capTxt = capMade ? `奶蓋 ${capMade} 杯${capDump?`（倒 ${capDump}）`:""}`
+                 : (capDump ? `奶蓋倒 ${capDump} 杯` : "");
     return `<div class="bl-day" onclick="document.getElementById('${id}').classList.toggle('hidden')">`
          + `<span><i class="bl-caret">▸</i>${d.slice(5)}　${wk}</span>`
          + `<b>${dayB?`${num1(dayB)} 桶`:""}`
-         + `${capMade?`${dayB?"　":""}奶蓋 ${capMade} 杯`:""}`
+         + `${capTxt?`${dayB?"　":""}${capTxt}`:""}`
          + `${dayC?`<small> · ${money(dayC)}</small>`:""}</b></div>`
          + `<div id="${id}" class="hidden">`
          + Object.keys(pots).filter(k=>pots[k]>0)
              .map(k=>`<div class="bl-part"><span>${k}</span><b>${num1(pots[k])} 桶</b></div>`).join("")
-         + (capMade||capDump
+         + (capMade
              ? `<div class="bl-part"><span>${CAP_NAME}${capDump?`（倒掉 ${capDump} 杯）`:""}</span>`
-               + `<b>${capMade} 杯</b></div>` : "")
+               + `<b>${capMade} 杯</b></div>`
+             : (capDump ? `<div class="bl-part"><span>${CAP_NAME} 倒掉</span><b>${capDump} 杯</b></div>` : ""))
          + `</div>`;
   }).join("");
   const tb=brewLogRows.reduce((a,r)=>a+(+r.buckets||0),0);
