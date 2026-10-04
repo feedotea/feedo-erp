@@ -504,11 +504,17 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   <div class="modal-sheet">
     <div class="modal-head"><span class="serif">煮茶・奶蓋紀錄</span><button onclick="closeModal('brewlog')">✕</button></div>
     <div class="modal-note">一行一天。點日期看那天煮了哪幾桶、打了幾杯奶蓋。要明細就匯出 CSV。</div>
+    <div class="chips" id="bl-quick" style="margin-bottom:8px">
+      <div class="chip" onclick="blRange('today')">今天</div>
+      <div class="chip" onclick="blRange('yest')">昨天</div>
+      <div class="chip" onclick="blRange('month')">這個月</div>
+      <div class="chip" onclick="blRange('d30')">近 30 天</div>
+    </div>
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
       <input type="date" id="bl-from" style="flex:1;min-width:120px">
       <span style="color:var(--grey)">～</span>
       <input type="date" id="bl-to" style="flex:1;min-width:120px">
-      <button class="mini-btn" onclick="loadBrewLog()">查詢</button>
+      <button class="mini-btn" onclick="[...document.getElementById('bl-quick').children].forEach(c=>c.classList.remove('on'));loadBrewLog()">查詢</button>
       <button class="mini-btn" id="bl-export" onclick="exportBrewLog()">⬇ CSV</button>
     </div>
     <div id="bl-sum" style="font-size:13px;color:var(--grey);margin-bottom:6px"></div>
@@ -1102,11 +1108,22 @@ const submitBrew=confirmBrew;   // 底部按鈕先跳確認，確認了才走 fl
    跟損耗修好之前一樣的毛病，記錯了要等月盤點才會冒出來。*/
 let brewLogRows=[], capLogRows=[];
 function openBrewLog(){
-  const to=localDate();
-  const d=new Date(); d.setDate(d.getDate()-29);
-  const from=d.toISOString().slice(0,10);
-  $("#bl-to").value=to; $("#bl-from").value=from;
   $("#modal-brewlog").classList.remove("hidden");
+  blRange("month");          // 一打開就是這個月
+}
+/* 快選。日期用字串推，不要用 new Date() 直接加減 ——
+   跨時區／日光節約會差一天，店裡只在意本地日期。*/
+function shiftDay(s,n){ const d=new Date(s+"T12:00:00"); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
+function blRange(kind){
+  const today=localDate();
+  let from=today, to=today;
+  if(kind==="yest"){ from=to=shiftDay(today,-1); }
+  else if(kind==="month"){ from=today.slice(0,8)+"01"; }
+  else if(kind==="d30"){ from=shiftDay(today,-29); }
+  $("#bl-from").value=from; $("#bl-to").value=to;
+  [...$("#bl-quick").children].forEach(c=>c.classList.remove("on"));
+  const map={today:0,yest:1,month:2,d30:3};
+  $("#bl-quick").children[map[kind]].classList.add("on");
   loadBrewLog();
 }
 async function loadBrewLog(){
