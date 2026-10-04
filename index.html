@@ -640,7 +640,7 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   <div class="sec-eyebrow ms-tog" onclick="toggleMonthSeries()"><span id="ms-caret">▸</span> 各月損益</div>
   <div class="card hidden" id="ms-body" style="margin-bottom:14px"></div>
   <div style="display:flex;gap:8px;margin-bottom:14px">
-    <button class="mini-btn" style="flex:1" onclick="exportCSV()">匯出 CSV</button>
+    <button class="mini-btn" style="flex:1" onclick="exportCSV()">⬇ 匯出月報表</button>
     <button class="mini-btn" style="flex:1;border-color:var(--ink);color:var(--ink)" onclick="openPosImport()">⬆ 匯入微碧報表</button>
   </div>
   <div class="sec-eyebrow">當月營運</div>
@@ -2489,13 +2489,82 @@ async function deleteExpense(id){
   renderReport();
   toast("已刪除該筆開銷"+(sent?"":"　⚠ 待同步"));
 }
+/* 整個月的報表，不是只有開銷。
+   按鈕在報表頁，匯出來卻只有開銷明細 —— 看到的跟拿到的不一樣。
+   現在一張 CSV 包四段：損益表、當月營運、每日營收、開銷明細。
+   用空白列分段，Excel 開起來一眼看得出層次。*/
 function exportCSV(){
-  const m=viewMonth;const rows=[["日期","類別","金額","付給誰","付款方式","備註"]];
-  expenses.filter(e=>e.date.startsWith(m)).forEach(e=>rows.push([e.date,e.cat,e.amt,e.payee,e.method,e.note]));
-  const csv="\ufeff"+rows.map(r=>r.map(c=>`"${c}"`).join(",")).join("\n");
-  const blob=new Blob([csv],{type:"text/csv"});const url=URL.createObjectURL(blob);
-  const a=document.createElement("a");a.href=url;a.download=`開銷_${m}.csv`;a.click();
-  toast("已匯出 CSV");
+  const m=viewMonth;
+  const L=[]; const put=(...c)=>L.push(c);
+  const n=v=>Math.round((+v||0)*100)/100;
+
+  const localRev=dailyRevenue.filter(r=>r.date.startsWith(m)).reduce((s,r)=>s+r.amt,0);
+  const have = monthReport && monthReport.month===m;
+  const rev = localRev || (have ? Number(monthReport.revenue)||0 : 0);
+  const cogs = have ? Number(monthReport.cogs)||0 : null;
+  const monthExp = expenses.filter(e=>e.date.startsWith(m));
+  const opex = monthExp.filter(e=>e.cat!=="廠商貨款").reduce((s,e)=>s+e.amt,0);
+  const paid = monthExp.filter(e=>e.cat==="廠商貨款").reduce((s,e)=>s+e.amt,0);
+  const pct = v => rev ? (Math.round(v/rev*1000)/10).toFixed(1)+"%" : "";
+
+  let dayRows = dailyRevenue.filter(r=>r.date.startsWith(m)).map(r=>({date:r.date,amt:r.amt}));
+  if(!dayRows.length && have && (monthReport.days||[]).length)
+    dayRows = monthReport.days.map(d=>({date:String(d.date).slice(0,10), amt:Number(d.amt)||0}));
+  dayRows.sort((a,b)=>a.date.localeCompare(b.date));
+
+  put(SHOP_NAME+" 月報表", m);
+  put("匯出時間", new Date().toLocaleString("zh-TW"));
+  put("營業天數", dayRows.length, "日均營收", dayRows.length?n(rev/dayRows.length):"");
+  put();
+
+  put("【損益表】");
+  put("項目","金額","佔營收");
+  put("營業收入", n(rev), rev?"100.0%":"");
+  put("營業成本（當月實際耗用的料）", cogs===null?"":-n(cogs), cogs===null?"":pct(cogs));
+  put("營業毛利", cogs===null?"":n(rev-cogs), cogs===null?"":pct(rev-cogs));
+  const byCat={};
+  monthExp.filter(e=>e.cat!=="廠商貨款").forEach(e=>{byCat[e.cat]=(byCat[e.cat]||0)+e.amt;});
+  Object.keys(byCat).sort((a,b)=>byCat[b]-byCat[a]).forEach(c=>put("　"+c, -n(byCat[c]), pct(byCat[c])));
+  put("營業費用合計", -n(opex), pct(opex));
+  put("本期損益", cogs===null?"":n(rev-cogs-opex), cogs===null?"":pct(rev-cogs-opex));
+  put("（本月付給廠商 · 現金流，不是成本）", n(paid), "");
+  put();
+
+  if(have && monthReport.pos){
+    const p=monthReport.pos;
+    put("【當月營運】");
+    put("杯數", p.cups, "訂單", p.orders);
+    put("客單價", p.orders?n(rev/p.orders):"", "每杯均價", p.cups?n(rev/p.cups):"");
+    put("自帶環保杯", p.eco, "周邊/袋子", p.others);
+    put();
+  }
+  if(have && (monthReport.by_category||[]).length){
+    put("【營收組成】");
+    put("分類","件數","金額","佔營收");
+    monthReport.by_category.forEach(c=>put(c.category, c.qty, n(c.amount), pct(Number(c.amount)||0)));
+    put();
+  }
+
+  put("【每日營收】");
+  put("日期","星期","金額");
+  const WK=["日","一","二","三","四","五","六"];
+  dayRows.forEach(r=>put(r.date, WK[new Date(r.date).getDay()], n(r.amt)));
+  put("合計","", n(rev));
+  put();
+
+  put("【開銷明細】");
+  put("日期","類別","金額","付給誰","付款方式","備註");
+  monthExp.slice().sort((a,b)=>a.date.localeCompare(b.date))
+    .forEach(e=>put(e.date, e.cat, n(e.amt), e.payee, e.method, e.note));
+  put("合計","", n(monthExp.reduce((s,e)=>s+e.amt,0)));
+
+  const esc=v=>`"${String(v==null?"":v).replace(/"/g,'""')}"`;
+  const csv="\ufeff"+L.map(r=>r.map(esc).join(",")).join("\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download=`月報表_${m}.csv`; a.click();
+  URL.revokeObjectURL(a.href);
+  toast(`已匯出 ${m} 月報表`);
 }
 
 /* ===== 微碧 POS 匯入 =====
