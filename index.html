@@ -215,6 +215,8 @@ body{
 .pl-x small{display:block;font-size:10px}
 .pl-x b{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
 .pl-x i{font-style:normal;font-size:11.5px}
+.ms-tog{cursor:pointer;user-select:none}
+.ms-tog span{display:inline-block;font-size:10px;color:var(--grey);margin-right:4px}
 .ms-row{display:grid;grid-template-columns:1fr .95fr .55fr 1fr;gap:6px;align-items:baseline;
   padding:11px 14px;border-bottom:1px solid var(--line);font-size:15px;font-weight:600;
   font-variant-numeric:tabular-nums;cursor:pointer}
@@ -622,8 +624,8 @@ select.txt-input{appearance:none;-webkit-appearance:none}
     <div class="pl-note" id="pl-warn" style="display:none"></div>
     <div id="pl-extra"></div>
   </div>
-  <div class="sec-eyebrow">各月損益</div>
-  <div class="card" id="ms-body" style="margin-bottom:14px"></div>
+  <div class="sec-eyebrow ms-tog" onclick="toggleMonthSeries()"><span id="ms-caret">▸</span> 各月損益</div>
+  <div class="card hidden" id="ms-body" style="margin-bottom:14px"></div>
   <div style="display:flex;gap:8px;margin-bottom:14px">
     <button class="mini-btn" style="flex:1" onclick="exportCSV()">匯出 CSV</button>
     <button class="mini-btn" style="flex:1;border-color:var(--ink);color:var(--ink)" onclick="openPosImport()">⬆ 匯入微碧報表</button>
@@ -2259,9 +2261,15 @@ function prevMonth(m){ const y=+m.slice(0,4), mo=+m.slice(5,7); const d=new Date
    算式跟上面的損益表同一套（毛利＝營收−物料成本、淨利再減營業費用），
    不要兩邊各算各的。*/
 let monthSeries=null;
+function toggleMonthSeries(){
+  const box=$("#ms-body"), c=$("#ms-caret"); if(!box) return;
+  const open=box.classList.toggle("hidden")===false;
+  if(c) c.textContent = open ? "▾" : "▸";
+  if(open) loadMonthSeries();           // 展開才去拿，平常不浪費一個 round trip
+}
 async function loadMonthSeries(){
   if(!dataReady||!isManager())return;
-  const box=$("#ms-body"); if(!box) return;
+  const box=$("#ms-body"); if(!box||box.classList.contains("hidden")) return;
   if(monthSeries){ renderMonthSeries(); return; }
   box.innerHTML=`<div class="empty"><div class="t">讀取中…</div></div>`;
   try{ monthSeries = await callRpc("erp_month_series",{p_months:12}) || []; }
@@ -4040,7 +4048,7 @@ function nav(scr){
   $("#submit-log").classList.toggle("hidden",scr!=="log");
   $("#submit-expense").classList.toggle("hidden",scr!=="expense");
   $("#submit-stocktake").classList.toggle("hidden",scr!=="stocktake");
-  if(scr==="report"){renderReport();renderRevenue();loadMonthReport();loadMonthSeries();}
+  if(scr==="report"){renderReport();renderRevenue();loadMonthReport();}
   if(scr==="analysis")loadAnalytics();
   if(scr==="expense")renderPay();
   if(scr==="recon")renderRecon();
