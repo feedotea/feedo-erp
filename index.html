@@ -184,6 +184,9 @@ body{
 .exp-cat-row .nm{font-size:14px;font-weight:600}
 .exp-cat-row .amt{font-variant-numeric:tabular-nums;font-size:15px;font-weight:700}
 .exp-cat-row .pct{font-size:11px;color:var(--grey)}
+.cat-hint{margin-top:8px;padding:9px 11px;background:var(--news);border-left:3px solid var(--warn);
+  font-size:12.5px;line-height:1.6;color:var(--ink)}
+.cat-hint b{font-weight:700}
 .exp-item{display:flex;justify-content:space-between;align-items:center;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--paper)}
 .exp-item:last-child{border-bottom:none}
 .exp-item .l .n{font-size:14px;font-weight:600}
@@ -550,7 +553,8 @@ select.txt-input{appearance:none;-webkit-appearance:none}
 <div class="screen hidden" id="scr-expense">
   <div class="sec-eyebrow">記一筆 開銷</div>
   <div class="card card-pad">
-    <div class="field"><label>類別</label><div class="chips" id="exp-cats"></div></div>
+    <div class="field"><label>類別</label><div class="chips" id="exp-cats"></div>
+      <div id="exp-cat-hint" class="cat-hint" style="display:none"></div></div>
     <div class="field"><label>金額</label><input class="num-input" id="exp-amt" type="number" inputmode="decimal" placeholder="0"></div>
     <div class="field"><label>付給誰</label><input class="txt-input" id="exp-payee" placeholder="例：房東 / 松霖 / 台電"></div>
     <div class="field"><label>付款方式</label>
@@ -2120,6 +2124,17 @@ function renderExpCats(){
   const box=$("#exp-cats");box.innerHTML="";
   EXP_CATS.forEach(c=>{const e=document.createElement("div");e.className="chip"+(expState.cat===c?" on":"");e.textContent=c;
     e.onclick=()=>{expState.cat=c;renderExpCats();};box.appendChild(e);});
+  /* 「廠商貨款」被故意排除在營業開銷之外（它是現金流，真正的成本從庫存算）。
+     但沒有建品項的東西 —— 冰塊就是 —— 不會有庫存異動，所以物料成本也抓不到，
+     記成廠商貨款的話那筆錢在利潤表上會完全消失。提醒一下，不要靠人記得。*/
+  const hint=$("#exp-cat-hint");
+  if(hint){
+    const on = expState.cat==="廠商貨款";
+    hint.style.display = on ? "block" : "none";
+    if(on) hint.innerHTML =
+      "這筆<b>不會算進「本月利潤」</b>。廠商貨款是現金流，真正的成本是用掉料的時候"
+      + "從庫存算的。<br><b>沒有建品項的東西</b>（例如冰塊）請改選「<b>雜支</b>」，不然這筆錢會憑空不見。";
+  }
 }
 $("#exp-method").addEventListener("click",e=>{if(e.target.dataset.m){expState.method=e.target.dataset.m;
   [...$("#exp-method").children].forEach(b=>b.classList.toggle("on",b.dataset.m===expState.method));}});
