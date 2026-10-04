@@ -364,6 +364,8 @@ select.txt-input{appearance:none;-webkit-appearance:none}
       <div class="seg" id="log-type"><button class="on" data-t="用量">用量</button><button data-t="進貨">進貨</button></div></div>
     <div class="field"><label>品項</label><div class="chips" id="log-items"></div>
       <div id="log-hint" style="font-size:11px;color:var(--grey);margin-top:8px;letter-spacing:.3px"></div></div>
+    <!-- 單位：庫存單位之外，也能用瓶／包／箱填，系統自己換算 -->
+    <div class="field" id="log-units-box" style="display:none"><label>單位</label><div class="chips" id="log-units"></div></div>
     <div class="field"><label>數量 <span id="log-unit" style="color:var(--ink)"></span></label>
       <input class="num-input" id="log-qty" type="number" inputmode="decimal" placeholder="0"></div>
     <div class="field" id="log-cost-box" style="display:none;margin-bottom:0">
@@ -488,6 +490,7 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   <div class="modal-sheet">
     <div class="modal-head"><span class="serif">確認到貨</span><button onclick="closeModal('receive')">✕</button></div>
     <div class="modal-note" id="rc-info"></div>
+    <div class="field"><label>單位</label><div class="chips" id="rc-units"></div></div>
     <div class="field">
       <label>實際到貨數量（<span id="rc-unit"></span>）</label>
       <input class="txt-input" id="rc-qty" type="number" inputmode="decimal" placeholder="0">
@@ -1466,8 +1469,42 @@ function generateBrewPDF(){
   closeModal('pdf');
   toast("已產生明日煮茶單，可列印給店員");
 }
+/* 一個品項「進出」可以用哪些單位填。
+   庫存單位是配方和成本的基準（ml／g／個），但進貨是一箱一箱、用的是一瓶一瓶，
+   沒人會想「用了 936ml」。所以把品項上設好的盤點單位（瓶／包）和叫貨單位（箱）
+   都列出來，填哪個都行，送出前換回庫存單位。老闆 10/04：「進出用量進貨那邊的單位都只有 ml」。*/
+function ioUnits(it){
+  const out=[{u:it.unit,k:1}];
+  const add=(u,k)=>{ if(u&&k>0&&u!==it.unit&&!out.some(x=>x.u===u)) out.push({u,k}); };
+  if(it.tea) add("包",it.packG);
+  add(it.countUnit,it.countPack);
+  add(it.orderUnit,it.orderPack);
+  return out;
+}
+function unitHint(u,k,it){ return k===1?"("+u+")":`(${u}，1${u} ＝ ${k.toLocaleString()}${it.unit})`; }
 /* 記一筆物料 */
-let logState={type:"用量",code:null};
+let logState={type:"用量",code:null,unit:null,k:1};
+function renderLogUnits(it){
+  const ub=$("#log-units"), box=$("#log-units-box"); if(!ub||!box) return;
+  ub.innerHTML="";
+  if(!it){ box.style.display="none"; return; }
+  const list=ioUnits(it);
+  // 預設跟月盤點同一個單位（瓶／包）—— 老闆：「牛奶進貨要跟月度盤點一樣」。
+  // 沒設盤點單位的，進貨退到叫貨單位（箱），用量退到庫存單位。
+  if(!list.some(x=>x.u===logState.unit)){
+    const cnt = list.find(x=>x.u===it.countUnit)||list.find(x=>x.u==="包");
+    const pick = cnt || (logState.type==="進貨" ? list[list.length-1] : list[0]);
+    logState.unit=pick.u; logState.k=pick.k;
+  }
+  list.forEach(x=>{
+    const c=document.createElement("div"); c.className="chip"+(x.u===logState.unit?" on":""); c.textContent=x.u;
+    c.onclick=()=>{logState.unit=x.u;logState.k=x.k;[...ub.children].forEach(y=>y.classList.remove("on"));c.classList.add("on");
+      $("#log-unit").textContent=unitHint(x.u,x.k,it);};
+    ub.appendChild(c);
+  });
+  box.style.display=list.length>1?"":"none";
+  $("#log-unit").textContent=unitHint(logState.unit,logState.k,it);
+}
 function renderLog(){
   const box=$("#log-items");box.innerHTML="";
   // 進貨：全部品項(含茶葉)都能進；用量：只有非茶葉(茶葉用量走煮茶頁)
@@ -1475,12 +1512,12 @@ function renderLog(){
   list.forEach(i=>{
     const c=document.createElement("div");c.className="chip"+(logState.code===i.code?" on":"");
     c.textContent=i.name+(i.tea?" 🍵":"");
-    c.onclick=()=>{logState.code=i.code;renderLog();$("#log-unit").textContent="("+i.unit+")";};box.appendChild(c);
+    c.onclick=()=>{logState.code=i.code;logState.unit=null;logState.k=1;renderLog();renderLogUnits(i);};box.appendChild(c);
   });
   const hint=$("#log-hint");
   if(hint)hint.textContent = logState.type==="進貨" ? "進貨可選全部品項，茶葉🍵送到也在這裡加庫存" : "用量只記非茶葉；茶葉用量請用「煮茶」頁";
 }
-$("#log-type").addEventListener("click",e=>{if(e.target.dataset.t){logState.type=e.target.dataset.t;logState.code=null;
+$("#log-type").addEventListener("click",e=>{if(e.target.dataset.t){logState.type=e.target.dataset.t;logState.code=null;logState.unit=null;logState.k=1;renderLogUnits(null);
   [...$("#log-type").children].forEach(b=>b.classList.toggle("on",b.dataset.t===logState.type));
   $("#log-submit-btn").textContent=logState.type==="進貨"?"記錄進貨":"記錄用量";
   $("#log-unit").textContent="";renderLog();updateLogCostBox();}});
@@ -1494,18 +1531,22 @@ async function submitLog(){
   if(!logState.code){toast("先選品項");return;}if(!q||q<=0){toast("填數量");return;}
   const it=items.find(i=>i.code===logState.code);
   const receiving=logState.type==="進貨";
-  it.bal=Math.max(0,it.bal+(receiving?q:-q));
+  // 填的是瓶／包／箱就換回庫存單位；單價也是「每個庫存單位」
+  const u=logState.unit||it.unit, k=(logState.unit&&logState.k>0)?logState.k:1;
+  const qty=Math.round(q*k*1000)/1000;
+  it.bal=Math.max(0,it.bal+(receiving?qty:-qty));
   const amt=(receiving&&isManager())?parseFloat($("#log-amt").value):NaN;
-  const unitCost=(amt>0&&q>0)?Math.round(amt/q*10000)/10000:null;
+  const unitCost=(amt>0&&qty>0)?Math.round(amt/qty*10000)/10000:null;
+  const conv=k!==1?`${q}${u} ＝ ${qty.toLocaleString()}${it.unit}`:"";
   const sent=await push("erp_log_move",{
-    p_id:uuid(),p_code:it.code,p_kind:receiving?"receive":"use",p_qty:q,
-    p_note:receiving?"臨時進貨":"",p_date:localDate(),
+    p_id:uuid(),p_code:it.code,p_kind:receiving?"receive":"use",p_qty:qty,
+    p_note:receiving?`臨時進貨${conv?"（"+conv+"）":""}`:(conv?`用量（${conv}）`:""),p_date:localDate(),
     p_unit_cost:unitCost,
     // 這裡是臨時採購，不能結掉廠商那張單 —— 那是叫貨頁「✓ 到貨」的事
     p_close_order:false});
   $("#log-qty").value="";$("#log-amt").value="";
   renderInv();renderOrder();refreshSummary();
-  toast(`${it.name} ${logState.type} ${q}${it.unit}`+(sent?"":"　⚠ 待同步"));
+  toast(`${it.name} ${logState.type} ${q}${u}`+(k!==1?`（= ${qty.toLocaleString()}${it.unit}）`:"")+(sent?"":"　⚠ 待同步"));
   if(sent)resyncIfClean();
 }
 
@@ -1905,6 +1946,7 @@ function ordToBase(it,qty,unit){
   if(unit==="斤" && it.unit==="g") return qty*G_PER_JIN;   // 後備
   return qty;
 }
+let rcUnit=null;
 function openReceive(code){
   const it=items.find(i=>i.code===code); if(!it)return;
   const o=pendingOrders.find(x=>x.item_code===code);
@@ -1913,8 +1955,19 @@ function openReceive(code){
   $("#rc-info").innerHTML = o
     ? `<b>${it.name}</b><br>當初叫 ${o.qty}${o.unit}${o.unit!==it.unit?`（= ${base} ${it.unit}）`:""}<br>廠商給的量不一樣就改下面的數字`
     : `<b>${it.name}</b><br>沒有對應的叫貨紀錄，直接填實際到貨量`;
-  $("#rc-unit").textContent=it.unit;
-  $("#rc-qty").value=base||"";
+  // 單位：預設用當初叫貨的單位（箱），廠商送來幾箱就填幾箱
+  const list=ioUnits(it);
+  rcUnit = (o && list.some(x=>x.u===o.unit)) ? list.find(x=>x.u===o.unit) : list[0];
+  const ub=$("#rc-units"); ub.innerHTML="";
+  list.forEach(x=>{const c=document.createElement("div");c.className="chip"+(x.u===rcUnit.u?" on":"");c.textContent=x.u;
+    c.onclick=()=>{ const cur=parseFloat($("#rc-qty").value);
+      if(cur>0) $("#rc-qty").value=Math.round(cur*rcUnit.k/x.k*1000)/1000;   // 換單位時把數字一起換
+      rcUnit=x;[...ub.children].forEach(y=>y.classList.remove("on"));c.classList.add("on");
+      $("#rc-unit").textContent=unitHint(x.u,x.k,it).slice(1,-1);};
+    ub.appendChild(c);});
+  ub.parentElement.style.display=list.length>1?"":"none";
+  $("#rc-unit").textContent=unitHint(rcUnit.u,rcUnit.k,it).slice(1,-1);
+  $("#rc-qty").value = o ? (rcUnit.u===o.unit ? Number(o.qty) : (base?Math.round(base/rcUnit.k*1000)/1000:"")) : "";
   $("#rc-amt").value="";
   $("#rc-cost-hint").textContent = isManager()
     ? `目前帳上成本 ${it.cost}/${it.unit}。填了金額會用移動平均更新，不填就維持原樣。` : "";
@@ -1925,18 +1978,21 @@ async function submitReceive(){
   const q=parseFloat($("#rc-qty").value);
   if(!q||q<=0){toast("填數量");return;}
   const it=items.find(i=>i.code===receiveCode); if(!it)return;
-  it.bal+=q;
-  // 選填的總金額換算成單價。不填就傳 null，後端不會動成本。
+  const k=(rcUnit&&rcUnit.k>0)?rcUnit.k:1, u=rcUnit?rcUnit.u:it.unit;
+  const qty=Math.round(q*k*1000)/1000;
+  it.bal+=qty;
+  // 選填的總金額換算成單價（每個庫存單位）。不填就傳 null，後端不會動成本。
   const amt = isManager() ? parseFloat($("#rc-amt").value) : NaN;
-  const unitCost=(amt>0&&q>0)?Math.round(amt/q*10000)/10000:null;
+  const unitCost=(amt>0&&qty>0)?Math.round(amt/qty*10000)/10000:null;
   const sent=await push("erp_log_move",{
-    p_id:uuid(),p_code:it.code,p_kind:"receive",p_qty:q,p_note:"叫貨到貨",
+    p_id:uuid(),p_code:it.code,p_kind:"receive",p_qty:qty,
+    p_note:`叫貨到貨${k!==1?`（${q}${u} ＝ ${qty.toLocaleString()}${it.unit}）`:""}`,
     p_date:localDate(),p_unit_cost:unitCost,p_close_order:true});
   orderedCodes=orderedCodes.filter(c=>c!==it.code);
   pendingOrders=pendingOrders.filter(o=>o.item_code!==it.code);
   closeModal('receive');
   renderOrder();renderInv();renderBrew();refreshSummary();
-  toast(`${it.name} 到貨 ${q}${it.unit}`+(unitCost?`　單價 ${unitCost}`:"")+(sent?"":"　⚠ 待同步"));
+  toast(`${it.name} 到貨 ${q}${u}`+(k!==1?`（= ${qty.toLocaleString()}${it.unit}）`:"")+(unitCost?`　單價 ${unitCost}/${it.unit}`:"")+(sent?"":"　⚠ 待同步"));
   if(sent)resyncIfClean();
 }
 
