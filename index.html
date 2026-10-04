@@ -607,7 +607,11 @@ select.txt-input{appearance:none;-webkit-appearance:none}
   <div class="card card-pad">
     <div class="field"><label>類別</label><div class="chips" id="exp-cats"></div>
       <div id="exp-cat-hint" class="cat-hint" style="display:none"></div></div>
-    <div class="field"><label>金額</label><input class="num-input" id="exp-amt" type="number" inputmode="decimal" placeholder="0"></div>
+    <div style="display:flex;gap:10px">
+      <div class="field" style="flex:1.2"><label>金額</label><input class="num-input" id="exp-amt" type="number" inputmode="decimal" placeholder="0"></div>
+      <div class="field" style="flex:1"><label>日期<small style="color:var(--grey);font-weight:400"> · 補上個月的就改這裡</small></label>
+        <input class="txt-input" id="exp-date" type="date" onchange="renderExpHint()"></div>
+    </div>
     <div class="field"><label>付給誰</label><input class="txt-input" id="exp-payee" placeholder="例：房東 / 松霖 / 台電" oninput="renderExpHint()"></div>
     <div class="field"><label>付款方式</label>
       <div class="seg" id="exp-method"><button class="on" data-m="轉帳">轉帳</button><button data-m="現金">現金</button><button data-m="刷卡">刷卡</button></div></div>
@@ -2201,6 +2205,9 @@ function expHintState(){
       +"<br>沒建品項的東西（例如<b>冰塊</b>）請改選「<b>雜支</b>」，不然這筆錢會憑空不見。"};
   if(cat==="廠商貨款" && sup)
     return {lv:"ok", msg:"「"+eh(sup)+"」有對應的品項 ✓ 這筆算現金流，成本會在用掉料的時候從庫存算。"};
+  const d=(($("#exp-date")||{}).value||"");
+  if(d && d.slice(0,7)!==localDate().slice(0,7))
+    return {lv:"ok", msg:"這筆會記在 <b>"+d.slice(0,7)+"</b>，不是這個月。報表要翻到那個月才看得到。"};
   if(cat && cat!=="廠商貨款" && sup)
     return {lv:"warn", msg:"「"+eh(sup)+"」是<b>有建品項的廠商</b>，這筆看起來是進貨。"
       +"<br>記成「"+eh(cat)+"」的話，<b>庫存那邊會再算一次成本，等於算了兩遍</b>。確定不是「<b>廠商貨款</b>」嗎？"};
@@ -2225,12 +2232,18 @@ async function submitExpense(){
     const plain=st.msg.replace(/<br>/g,"\n").replace(/<[^>]+>/g,"");
     if(!confirm(plain+"\n\n還是要用「"+cat+"」記這筆嗎？")) return;
   }
-  const id=uuid(),date=localDate();
+  const id=uuid();
+  // 房租水電常常是隔月才補記的，一律寫今天會讓兩個月都歪掉
+  const date=($("#exp-date").value||localDate());
+  if(date>localDate()){ toast("不能記未來的日期"); return; }
   expenses.push({id,date,cat,amt,payee:payee||"—",method,note,paid:true});
   const sent=await push("erp_add_expense",{
     p_id:id,p_cat:cat,p_amount:amt,p_payee:payee||"—",p_method:method,p_note:note,p_date:date});
-  $("#exp-amt").value="";$("#exp-payee").value="";$("#exp-note").value="";expState.cat=null;renderExpCats();renderExpHint();
-  renderReport();toast(`已記 ${method} · ${money(amt)}`+(sent?"":"　⚠ 待同步"));
+  $("#exp-amt").value="";$("#exp-payee").value="";$("#exp-note").value="";
+  expState.cat=null;renderExpCats();renderExpHint();
+  renderReport();
+  const back = date!==localDate() ? `${date.slice(5)} ` : "";
+  toast(`${back}已記 ${method} · ${money(amt)}`+(sent?"":"　⚠ 待同步"));
 }
 
 /* 待匯款 */
@@ -4060,7 +4073,8 @@ function nav(scr){
   $("#submit-stocktake").classList.toggle("hidden",scr!=="stocktake");
   if(scr==="report"){renderReport();renderRevenue();loadMonthReport();}
   if(scr==="analysis")loadAnalytics();
-  if(scr==="expense")renderPay();
+  if(scr==="expense"){ renderPay();
+    const d=$("#exp-date"); if(d){ d.max=localDate(); if(!d.value) d.value=localDate(); } }
   if(scr==="recon")renderRecon();
   if(scr==="stocktake")renderStocktake();
   if(scr==="inv")loadWaste();
