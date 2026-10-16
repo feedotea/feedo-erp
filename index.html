@@ -3308,6 +3308,22 @@ async function delWaste(r){
   renderInv();renderOrder();renderBrew();refreshSummary();loadWaste();
   toast(`已刪除：${r.name} ${r.qty}${r.unit}`);
 }
+/* 一次登記整組刪。試喝整杯是 3～4 筆材料，一筆一筆按 ✕ 很容易漏掉一筆（紙杯加回去了、奶粉沒加回去）。 */
+async function delWasteGroup(g){
+  if(!canWrite())return;
+  if(g.rows.length===1) return delWaste(g.rows[0]);
+  const lines=g.rows.map(r=>`　${r.name}　${(+r.qty).toLocaleString()}${r.unit}`).join("\n");
+  if(!confirm(`刪掉這次登記？\n\n${g.day} ${g.note}\n${lines}\n\n這 ${g.rows.length} 項的數量都會加回庫存。`))return;
+  let done=0;
+  for(const r of g.rows){
+    try{ await callRpc("erp_waste_delete",{p_id:r.id}); }
+    catch(e){ console.warn("損耗刪除失敗",e); toast(`刪到第 ${done+1} 項（${r.name}）失敗：${e.message||"請重試"}`); break; }
+    const it=items.find(i=>i.code===r.code); if(it) it.bal=(+it.bal||0)+(+r.qty||0);
+    done++;
+  }
+  renderInv();renderOrder();renderBrew();refreshSummary();loadWaste();
+  if(done===g.rows.length) toast(`已刪除：${g.note}（${done} 項）`);
+}
 function wasteErr(msg){
   const e=$("#waste-err"); if(!e) return;
   e.textContent=msg||""; e.style.display=msg?"block":"none";
@@ -3414,35 +3430,78 @@ function addComboChip(){
   box.insertBefore(c, box.firstChild);
 }
 function wasteEmpty(t){ return `<div class="empty"><div class="ic">🗑</div><div class="t">${t}</div></div>`; }
-const WASTE_SHOW=8;
+const WASTE_SHOW=6;   // 平常列最近幾「次」登記
+/* 後端回來的是一筆材料一列（試喝整杯 = 紙杯＋糖＋奶粉 3～4 列），直接攤出來一天就十幾列，看不出哪幾列是同一次按的。
+   這裡先把同一次登記合回一列：同一天、同一句備註、同一個人、而且品項沒重複 —— 重複出現同一個品項就當成另一次
+   （同一天按了兩次「試喝 阿薩姆巧克力」會分成兩組，才能只刪其中一次）。
+   後端是依 occurred_on、created_at 倒序排的，所以同一次的材料一定相鄰。
+   ✕ 一次刪整組；平常只列最近幾次，「看全部 30 天」才整份攤開，前幾天記錯的也刪得到。 */
+let wasteShowAll=false, wasteGroups=[];
+function groupWaste(rows){
+  const groups=[]; let g=null;
+  rows.forEach(r=>{
+    const same=g && g.day===r.day && g.note===r.note && g.who===r.who && !g.rows.some(x=>x.code===r.code);
+    if(!same){ g={day:r.day,note:r.note,who:r.who,rows:[],mine:true,cost:0}; groups.push(g); }
+    g.rows.push(r); g.mine=g.mine&&!!r.mine;
+    if(r.cost!==null&&r.cost!==undefined) g.cost+=+r.cost;
+  });
+  return groups;
+}
+function wasteDayLabel(d){
+  const dt=new Date(d+"T00:00:00"); const wd="日一二三四五六"[dt.getDay()];
+  return `${d.slice(5).replace("-","/")}（${wd}）`;
+}
 function renderWaste(rows){
   const box=$("#waste-recent");
   if(!rows.length){ box.innerHTML=wasteEmpty("這 30 天沒有記過損耗"); return; }
+  wasteGroups=groupWaste(rows);
+  const shown=wasteShowAll?wasteGroups:wasteGroups.slice(0,WASTE_SHOW);
   box.innerHTML="";
-  rows.slice(0,WASTE_SHOW).forEach(r=>{
+  let lastDay=null;
+  shown.forEach(g=>{
+    if(g.day!==lastDay){
+      const h=document.createElement("div");
+      h.style.cssText="padding:8px 14px 4px;font-size:11px;letter-spacing:1px;color:var(--grey);background:var(--paper);border-bottom:1px solid var(--line)";
+      h.textContent=wasteDayLabel(g.day);
+      box.appendChild(h); lastDay=g.day;
+    }
     const row=document.createElement("div"); row.className="inv-row";
-    const amt=(r.cost!==null&&r.cost!==undefined)?`<div class="u">${money(r.cost)}</div>`:"";
+    const one=g.rows.length===1, r0=g.rows[0];
+    const title=one?r0.name:g.note;
+    const detail=one?g.note:g.rows.map(r=>`${r.name} ${(+r.qty).toLocaleString()}${r.unit}`).join("、");
+    const amt=(g.cost>0)?`<div class="u">${money(g.cost)}</div>`:"";
+    const qty=one?`${(+r0.qty).toLocaleString()} ${r0.unit}`:`${g.rows.length} 項`;
     row.innerHTML=`<span class="dot r"></span>
-      <div class="nm">${r.name}<small>${r.day} · ${r.note}${r.who?" · "+r.who:""}</small></div>
-      <div class="bal"><div class="b">${(+r.qty).toLocaleString()} ${r.unit}</div>${amt}</div>`;
-    // 記錯了要刪得掉。店員只看得到自己那幾筆的 ✕，店長誰的都能刪
-    if(r.mine||isManager()){
+      <div class="nm">${title}<small>${detail}${g.who?" · "+g.who:""}</small></div>
+      <div class="bal"><div class="b">${qty}</div>${amt}</div>`;
+    // 記錯了要刪得掉。店員只看得到自己那幾組的 ✕，店長誰的都能刪
+    if(g.mine||isManager()){
       const x=document.createElement("button");
-      x.textContent="✕"; x.title="刪掉這筆";
+      x.textContent="✕"; x.title="刪掉這次登記";
       x.style.cssText="background:none;border:none;color:var(--grey);font-size:15px;"
         +"cursor:pointer;padding:6px 2px 6px 8px;line-height:1";
-      x.onclick=()=>delWaste(r);
+      x.onclick=()=>delWasteGroup(g);
       row.appendChild(x);
     }
     box.appendChild(row);
   });
   const total=rows.reduce((s,r)=>s+(+r.cost||0),0);
-  const more=rows.length>WASTE_SHOW ? `（共 ${rows.length} 筆，只列最近 ${WASTE_SHOW} 筆）` : "";
+  const hidden=wasteGroups.length>WASTE_SHOW;
+  const more=hidden&&!wasteShowAll ? `（共 ${wasteGroups.length} 次，只列最近 ${WASTE_SHOW} 次）` : hidden ? `（共 ${wasteGroups.length} 次）` : "";
   if(total>0||more){
     const sum=document.createElement("div"); sum.className="inv-row";
     sum.innerHTML=`<div class="nm" style="color:var(--grey);font-weight:400">30 天損耗合計${more}</div>
       <div class="bal"><div class="b low">${total>0?money(total):""}</div></div>`;
     box.appendChild(sum);
+  }
+  if(hidden){
+    const t=document.createElement("button");
+    t.className="chip"; t.id="waste-toggle";
+    t.style.cssText="display:block;width:100%;text-align:center;border-top:none;border-radius:0 0 2px 2px";
+    t.textContent=wasteShowAll?`收起，只看最近 ${WASTE_SHOW} 次`:"看全部 30 天";
+    t.onclick=()=>{ wasteShowAll=!wasteShowAll; renderWaste(rows);
+      if(!wasteShowAll) box.scrollIntoView({block:"nearest"}); };
+    box.appendChild(t);
   }
 }
 
