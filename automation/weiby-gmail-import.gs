@@ -372,28 +372,37 @@ function buildPayload(text) {
   const cPaid  = hdr.indexOf('付款時間');
   const cItems = hdr.indexOf('訂單項目');
   // 準備中的單沒有付款時間，只認付款時間會把一整天濾光（九月漏掉 7 天就是這樣）
-  const cWhenAlt = ['成立時間','建立時間','下單時間'].map(k => hdr.indexOf(k)).filter(i => i >= 0);
+  const cWhenAlt = ['確認時間','取單時間','出餐時間','成立時間','建立時間','下單時間']
+                     .map(k => hdr.indexOf(k)).filter(i => i >= 0);
   if (cItems < 0 || cTotal < 0 || cPaid < 0) {
     throw new Error('這不是訂單列表（找不到 訂單項目/總價/付款時間 欄）');
   }
 
   const cKind = hdr.indexOf('訂單類別');
+  /* 微碧有時候會吐出「多一格」的列：招待單的付款狀態是「招待,已付清」，
+     那個逗號沒有加引號，整列就從那裡開始往右位移一格 —— 付款時間變成空的，
+     這張單被丟掉，訂單數就對不上營運總表，整個檔卡住不匯（10/24 整天就是這樣沒進帳）。
+     位移一定發生在前段的文字欄，時間欄到最後都是連在一起的，所以後段改成從右邊數。 */
+  const cShift = [hdr.indexOf('確認時間'), hdr.indexOf('取單時間'), cPaid]
+                   .filter(i => i >= 0)[0];
   const dayMap = {}, items = [], orders = [];
   rows.slice(1).forEach(r => {
+    const over = r.length - hdr.length;                       // 多出來的格數
+    const at = i => (over > 0 && i >= cShift) ? r[i + over] : r[i];
     // 只排除「取消」。店裡的單大多停在「準備中」，要求 === '完成' 幾乎全被丟掉
-    if (cStat >= 0 && /取消/.test(r[cStat] || '')) return;
-    // 付款時間優先，沒有就退回成立／建立／下單時間
-    let when = r[cPaid] || '';
-    if (!when) { for (const i of cWhenAlt) { if (r[i]) { when = r[i]; break; } } }
+    if (cStat >= 0 && /取消/.test(at(cStat) || '')) return;
+    // 付款時間優先，沒有就退回確認／取單／出餐時間（招待單沒有付款時間）
+    let when = at(cPaid) || '';
+    if (!when) { for (const i of cWhenAlt) { if (at(i)) { when = at(i); break; } } }
     const m = when.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
     if (!m) return;
     const d = m[1] + '-' + ('0'+m[2]).slice(-2) + '-' + ('0'+m[3]).slice(-2);
     if (!dayMap[d]) dayMap[d] = { date: d, revenue: 0, orders: 0 };
-    const total = num(r[cTotal]);
+    const total = num(at(cTotal));
     dayMap[d].revenue += total;
     dayMap[d].orders++;
-    const its = parseOrderItems(r[cItems]);
-    const no = cNo >= 0 ? String(r[cNo] || '').trim() : '';
+    const its = parseOrderItems(at(cItems));
+    const no = cNo >= 0 ? String(at(cNo) || '').trim() : '';
     its.forEach(it => {
       items.push({ date: d, order_no: no || null,
                    name: it.name, qty: it.qty, options: it.options });
@@ -403,7 +412,7 @@ function buildPayload(text) {
       const hh = m[4] ? ('0'+m[4]).slice(-2) + ':' + m[5] + ':' + (m[6] || '00') : null;
       orders.push({ date: d, no: no, at: hh ? d + ' ' + hh : null, total: total,
                     items: its.reduce((a, b) => a + b.qty, 0),
-                    channel: cKind >= 0 ? (r[cKind] || null) : null });
+                    channel: cKind >= 0 ? (at(cKind) || null) : null });
     }
   });
 

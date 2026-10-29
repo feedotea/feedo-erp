@@ -2868,19 +2868,25 @@ function posBuild(rows){
   }
 
   const cKind=col("訂單類別");
+  /* 微碧偶爾會吐出「多一格」的列：招待單的付款狀態是「招待,已付清」，
+     那個逗號沒加引號，整列就從那裡開始往右位移一格，付款時間變成空的。
+     位移只發生在前段的文字欄，時間欄之後是連在一起的，所以後段從右邊數回來。 */
+  const cShift=[col("確認時間"),col("取單時間"),cPaid].filter(i=>i>=0)[0];
   const dayMap={}; posItems=[]; posOrders=[]; let skipped=0;
   rows.slice(1).forEach(r=>{
-    if(cStat>=0 && r[cStat] && r[cStat]!=="完成"){ skipped++; return; }  // 取消的不算
-    const paid=r[cPaid]||"";
+    const over=r.length-hdr.length;
+    const at=i=>(over>0&&i>=cShift)?r[i+over]:r[i];
+    if(cStat>=0 && /取消/.test(at(cStat)||"")){ skipped++; return; }  // 只有取消的不算
+    const paid=at(cPaid)||"";
     const m=paid.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
     if(!m){ skipped++; return; }
     const d=`${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
     if(!dayMap[d]) dayMap[d]={date:d,revenue:0,orders:0};
-    const total=posNum(r[cTotal]);
+    const total=posNum(at(cTotal));
     dayMap[d].revenue+=total;
     dayMap[d].orders++;
-    const its=parseOrderItems(r[cItems]);
-    const no=cNo>=0?String(r[cNo]||"").trim():"";
+    const its=parseOrderItems(at(cItems));
+    const no=cNo>=0?String(at(cNo)||"").trim():"";
     its.forEach(it=>{
       posItems.push({date:d, order_no:no||null,
                      name:it.name, qty:it.qty, options:it.options});
@@ -2892,7 +2898,7 @@ function posBuild(rows){
       const hh=m[4]?`${m[4].padStart(2,"0")}:${m[5]}:${m[6]||"00"}`:null;
       posOrders.push({date:d, no, at:hh?`${d} ${hh}`:null, total,
                       items:its.reduce((a,b)=>a+b.qty,0),
-                      channel:cKind>=0?(r[cKind]||null):null});
+                      channel:cKind>=0?(at(cKind)||null):null});
     }
   });
 
